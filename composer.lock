@@ -1,0 +1,288 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "fe625dff5b8c7e8b236d30dd00b14926",
+    "packages": [
+        {
+            "name": "moebius/loop",
+            "version": "dev-master",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/frodeborli/moebius-loop.git",
+                "reference": "22fb64441eecfea3ef445f32dcc0ce7e964fa30d"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/frodeborli/moebius-loop/zipball/22fb64441eecfea3ef445f32dcc0ce7e964fa30d",
+                "reference": "22fb64441eecfea3ef445f32dcc0ce7e964fa30d",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=8.0"
+            },
+            "require-dev": {
+                "charm/testing": "dev-master"
+            },
+            "suggest": {
+                "ext-pcntl": "For signal handling support"
+            },
+            "default-branch": true,
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Moebius\\Loop\\": "src/"
+                },
+                "classmap": [
+                    "Loop.php",
+                    "LoopInterface.php"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Frode Børli",
+                    "email": "frode@ennerd.com"
+                }
+            ],
+            "description": "An event-loop compatability layer for creating packages that work with other event loop implementations such as ReactPHP or Amphp.",
+            "support": {
+                "issues": "https://github.com/frodeborli/moebius-loop/issues",
+                "source": "https://github.com/frodeborli/moebius-loop/tree/0.0.8-alpha"
+            },
+            "time": "2022-04-04T21:39:26+00:00"
+        },
+        {
+            "name": "moebius/promise",
+            "version": "dev-master",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/frodeborli/moebius-promise.git",
+                "reference": "8142bd0f5b57780c3a922d9725619764fe90d26d"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/frodeborli/moebius-promise/zipball/8142bd0f5b57780c3a922d9725619764fe90d26d",
+                "reference": "8142bd0f5b57780c3a922d9725619764fe90d26d",
+                "shasum": ""
+            },
+            "require-dev": {
+                "charm/testing": "dev-master"
+            },
+            "default-branch": true,
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Moebius\\Promise\\": "src/"
+                },
+                "classmap": [
+                    "Promise.php"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Frode Børli",
+                    "email": "frode@ennerd.com"
+                }
+            ],
+            "description": "A promise implementation for PHP.",
+            "support": {
+                "issues": "https://github.com/frodeborli/moebius-promise/issues",
+                "source": "https://github.com/frodeborli/moebius-promise/tree/0.0.2"
+            },
+            "time": "2022-04-05T08:18:50+00:00"
+        }
+    ],
+    "packages-dev": [
+        {
+            "name": "charm/options",
+            "version": "1.0.5",
+            "source": {
+                "type": "git",
+                "url": "https://bitbucket.org/ennerd/charm-options.git",
+                "reference": "7e67cea54370b22b015556f1b31b65b62ce92e89"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://bitbucket.org/ennerd/charm-options/get/7e67cea54370b22b015556f1b31b65b62ce92e89.zip",
+                "reference": "7e67cea54370b22b015556f1b31b65b62ce92e89",
+                "shasum": ""
+            },
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "AbstractOptions.php"
+                ],
+                "psr-4": {
+                    "Charm\\Options\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Frode Børli",
+                    "email": "frode@ennerd.com"
+                }
+            ],
+            "description": "A generic class for storing options while enforcing option types.",
+            "homepage": "https://bitbucket.org/ennerd/charm-options",
+            "support": {
+                "source": "https://bitbucket.org/ennerd/charm-options/src/7e67cea54370b22b015556f1b31b65b62ce92e89/?at=1.0.5"
+            },
+            "time": "2022-01-08T17:17:09+00:00"
+        },
+        {
+            "name": "charm/terminal",
+            "version": "1.0.6",
+            "source": {
+                "type": "git",
+                "url": "https://bitbucket.org/ennerd/terminal.git",
+                "reference": "c150ac68b012e5b9e3f05379be3cce2b04f9c9c9"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://bitbucket.org/ennerd/terminal/get/c150ac68b012e5b9e3f05379be3cce2b04f9c9c9.zip",
+                "reference": "c150ac68b012e5b9e3f05379be3cce2b04f9c9c9",
+                "shasum": ""
+            },
+            "require": {
+                "charm/options": "^1.0",
+                "charm/util-phpencode": "^1.0"
+            },
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "functions.php"
+                ],
+                "psr-4": {
+                    "Charm\\Terminal\\": "src/"
+                },
+                "classmap": [
+                    "Terminal.php"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Frode Børli",
+                    "email": "frode@ennerd.com"
+                }
+            ],
+            "description": "Organized and colorful command line output through a simple markup language.",
+            "homepage": "https://bitbucket.org/ennerd/terminal",
+            "support": {
+                "source": "https://bitbucket.org/ennerd/terminal/src/c150ac68b012e5b9e3f05379be3cce2b04f9c9c9/?at=1.0.6"
+            },
+            "time": "2022-04-01T11:14:40+00:00"
+        },
+        {
+            "name": "charm/testing",
+            "version": "dev-master",
+            "source": {
+                "type": "git",
+                "url": "https://bitbucket.org/ennerd/charm-testing.git",
+                "reference": "f434b69218f2a9d5d528abac93021cfe3f92882f"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://bitbucket.org/ennerd/charm-testing/get/f434b69218f2a9d5d528abac93021cfe3f92882f.zip",
+                "reference": "f434b69218f2a9d5d528abac93021cfe3f92882f",
+                "shasum": ""
+            },
+            "require": {
+                "charm/terminal": "^1.0",
+                "charm/util-phpencode": "^1.0"
+            },
+            "default-branch": true,
+            "bin": [
+                "bin/charm-testing"
+            ],
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Charm\\Testing\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Frode Børli",
+                    "email": "frode@ennerd.com"
+                }
+            ],
+            "description": "A tool for running regression and unit testing with very little scaffolding.",
+            "homepage": "https://bitbucket.org/ennerd/charm-testing",
+            "support": {
+                "source": "https://bitbucket.org/ennerd/charm-testing/src/f434b69218f2a9d5d528abac93021cfe3f92882f/?at=0.0.7"
+            },
+            "time": "2022-04-04T21:36:27+00:00"
+        },
+        {
+            "name": "charm/util-phpencode",
+            "version": "1.0.2",
+            "source": {
+                "type": "git",
+                "url": "https://bitbucket.org/ennerd/charm-util-phpencode.git",
+                "reference": "3d7d03532b8ce769618554581f21de4881ccd5f1"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://bitbucket.org/ennerd/charm-util-phpencode/get/3d7d03532b8ce769618554581f21de4881ccd5f1.zip",
+                "reference": "3d7d03532b8ce769618554581f21de4881ccd5f1",
+                "shasum": ""
+            },
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "php-encode.php"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Frode Børli",
+                    "email": "frode@ennerd.com"
+                }
+            ],
+            "description": "A small function that encodes compact PHP arrays, like json_encode - but for PHP arrays.",
+            "homepage": "https://bitbucket.org/ennerd/charm-util-phpencode",
+            "support": {
+                "source": "https://bitbucket.org/ennerd/charm-util-phpencode/src/3d7d03532b8ce769618554581f21de4881ccd5f1/?at=1.0.2"
+            },
+            "time": "2022-01-08T23:51:01+00:00"
+        }
+    ],
+    "aliases": [],
+    "minimum-stability": "dev",
+    "stability-flags": {
+        "moebius/loop": 20,
+        "moebius/promise": 20,
+        "charm/testing": 20
+    },
+    "prefer-stable": false,
+    "prefer-lowest": false,
+    "platform": [],
+    "platform-dev": [],
+    "plugin-api-version": "2.2.0"
+}

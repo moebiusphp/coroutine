@@ -1,0 +1,27 @@
+{
+    "name": "moebius/coroutine",
+    "description": "Easy to use coroutines for PHP.",
+    "type": "library",
+    "require": {
+        "moebius/loop": "dev-master",
+        "moebius/promise": "dev-master"
+    },
+    "require-dev": {
+        "charm/testing": "dev-master"
+    },
+    "license": "GPL-2.0-or-later",
+    "autoload": {
+        "psr-4": {
+            "Moebius\\Coroutine\\": "src/"
+        },
+        "classmap": ["Coroutine.php"],
+        "files": ["functions.php"]
+    },
+    "authors": [
+        {
+            "name": "Frode Børli",
+            "email": "frode@ennerd.com"
+        }
+    ],
+    "minimum-stability": "dev"
+}

@@ -12,7 +12,7 @@ Extremely simple API:
  * `M\go($callback)` will run a coroutine, but will not wait for it to finish. Use it in combination
    with `M\await(...$threads)` if you want to run multiple coroutines concurrently.
 
- * `M\await(...$threads)` will block your function and until the threads have finished.
+ * `M\await($thread)` will block your function and until the coroutine has finished.
 
  * `M\unblock($fp)` makes streams non-blocking.
 
@@ -149,6 +149,8 @@ There are three main ways to do this
 
 ### With the function wrappers
 
+*These functions have not been implemented yet*
+
 If your library uses functions like `file_get_contents` or `fopen` or `fsockopen`, the only
 modification you'll need to do is import alternative implementations of those functions
 from the `M\` namespace. After importing this, please run your unit tests and report back to
@@ -164,6 +166,8 @@ you have to change that back to `fopen`.
 ```
 
 ### With the unblock() function
+
+*This function has not been implemented yet, pending some refactoring*
 
 If you can't find a function wrapper for your particular function, you should "unblock" your
 stream resource with the `M\unblock()` function. Note that even if you use the unblock function,

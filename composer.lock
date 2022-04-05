@@ -63,12 +63,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/frodeborli/moebius-promise.git",
-                "reference": "8142bd0f5b57780c3a922d9725619764fe90d26d"
+                "reference": "d31998f202587479d423516cbb76049fcb0be694"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/frodeborli/moebius-promise/zipball/8142bd0f5b57780c3a922d9725619764fe90d26d",
-                "reference": "8142bd0f5b57780c3a922d9725619764fe90d26d",
+                "url": "https://api.github.com/repos/frodeborli/moebius-promise/zipball/d31998f202587479d423516cbb76049fcb0be694",
+                "reference": "d31998f202587479d423516cbb76049fcb0be694",
                 "shasum": ""
             },
             "require-dev": {
@@ -97,9 +97,9 @@
             "description": "A promise implementation for PHP.",
             "support": {
                 "issues": "https://github.com/frodeborli/moebius-promise/issues",
-                "source": "https://github.com/frodeborli/moebius-promise/tree/0.0.2"
+                "source": "https://github.com/frodeborli/moebius-promise/tree/0.0.3"
             },
-            "time": "2022-04-05T08:18:50+00:00"
+            "time": "2022-04-05T21:11:12+00:00"
         }
     ],
     "packages-dev": [

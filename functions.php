@@ -3,6 +3,9 @@ namespace M;
 
 use Moebius\Promise;
 use Moebius\Coroutine;
+use Moebius\Coroutine\RejectedException;
+use Moebius\Loop;
+use Fiber;
 
 /**
  * Run a coroutine and wait for the return value or an exception
@@ -52,7 +55,31 @@ function go(callable $coroutine, mixed ...$args): Promise {
  * @throws \Throwable Any exception cast from the coroutine/promise
  */
 function await(object $thenable): mixed {
-    throw new \Exception();
+    if (!Promise::isThenable($thenable)) {
+        // This is not a promise, so we'll treat it as a value that can be used
+        // immediately
+        return $thenable;
+    }
+    $resolved = null;
+    $value = null;
+    $thenable->then(function($result) use (&$resolved, &$value) {
+        $resolved = true;
+        $value = $result;
+    }, function($reason) use (&$resolved, &$value) {
+        $resolved = false;
+        $value = $reason;
+    });
+    while ($resolved === null) {
+        suspend();
+    }
+    if ($resolved === true) {
+        // we have a result
+        return $value;
+    } elseif ($value instanceof \Throwable) {
+        throw $value;
+    } else {
+        throw new RejectedException($value);
+    }
 }
 
 /**
@@ -80,7 +107,8 @@ function sleep(float $duration): void {
  * @return mixed The replaced stream resource if possible, or it will return the value that was received.
  */
 function unblock($resource): mixed {
-
+    // Work in progress. This is just a placeholder.
+    return $resource;
 }
 
 /**
@@ -91,7 +119,15 @@ function unblock($resource): mixed {
  * as `sleep()` or if you're monitoring a PHP value or promise.
  */
 function suspend(): void {
-    Coroutine::suspend();
+    if (Coroutine::getCurrent()) {
+        Coroutine::suspend();
+    } elseif (Fiber::getCurrent()) {
+        Fiber::suspend();
+    } elseif (Loop::isDraining()) {
+        throw new \Exception("suspend called outside of a coroutine while a loop is draining. fix your code!");
+    } else {
+        Loop::drain(function() { return true; });
+    }
 }
 
 /**

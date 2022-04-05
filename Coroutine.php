@@ -47,18 +47,13 @@ class Coroutine extends Promise {
      * Set configuration options for coroutines
      *
      * @param float $maxTime            The time available before Coroutine::interrupt() will yield
-     * @param callable $deferFunction   A callable which will add a function to the event loop
      */
     public static function configure(
-        float $maxTime = null,
-        callable $deferFunction = null
+        float $maxTime = null
     ) {
         self::bootstrap();
         if ($maxTime !== null) {
             self::$maxTime = $maxTime;
-        }
-        if ($deferFunction !== null) {
-            self::$deferFunction = $deferFunction;
         }
     }
 
@@ -146,7 +141,7 @@ class Coroutine extends Promise {
         } else {
             $this->stopContext();
             $this->runTime += microtime(true) - $startTime;
-            (self::$deferFunction)($this->run(...));
+            Loop::defer($this->run(...));
             return false;
         }
     }
@@ -177,14 +172,6 @@ class Coroutine extends Promise {
     private static float $maxTime = 0.01;
 
     /**
-     * Configure the function used to add tasks to the event loop,
-     * generally this would be \Moebius::defer(...), but it should also
-     * work directly with \React\EventLoop\Loop::futureTick(...) or
-     * Amp\Loop::defer(...)
-     */
-    private static mixed $deferFunction = null;
-
-    /**
      * Allow us to get the current Coroutine based on the current
      * Fiber.
      */
@@ -203,9 +190,6 @@ class Coroutine extends Promise {
             return;
         }
         self::$fibers = new WeakMap();
-        if (self::$deferFunction === null) {
-            self::$deferFunction = \Moebius\Loop::defer(...);
-        }
         self::$bootstrapped = true;
     }
 }

@@ -3,6 +3,7 @@ namespace M;
 
 use Moebius\Promise;
 use Moebius\Coroutine;
+use Moebius\Coroutine\Unblocker;
 use Moebius\Coroutine\RejectedException;
 use Moebius\Loop;
 use Fiber;
@@ -107,8 +108,7 @@ function sleep(float $duration): void {
  * @return mixed The replaced stream resource if possible, or it will return the value that was received.
  */
 function unblock($resource): mixed {
-    // Work in progress. This is just a placeholder.
-    return $resource;
+    return Unblocker::unblock($resource);
 }
 
 /**
@@ -143,4 +143,61 @@ function interrupt(): void {
         $callCount = 0;
         Coroutine::interrupt();
     }
+}
+
+/**
+ * Block until a stream becomes readable.
+ *
+ * @param resource $fp      The stream resource
+ * @param ?float $timeout   Optional timeout
+ * @return bool             False if timed out and stream is not workable yet
+ */
+function readable($fp, float $timeout=null): bool {
+    $workable = false;
+    if ($timeout !== null) {
+        $expires = microtime(true) + $timeout;
+    }
+    $cancel = Loop::onReadable($fp, function() use (&$workable, &$cancel) {
+        $workable = true;
+        $cancel();
+    });
+    do {
+        suspend();
+        if (!$workable && $timeout !== null) {
+            if (microtime(true) > $timeout) {
+                // timeout
+                $cancel();
+                return false;
+            }
+        }
+    } while(!$workable);
+}
+
+
+/**
+ * Block until a stream becomes writable.
+ *
+ * @param resource $fp
+ * @param ?float $timeout   Optional timeout
+ * @return bool             False if timed out and stream is not workable yet
+ */
+function writable($fp, float $timeout=null): bool {
+    $workable = false;
+    if ($timeout !== null) {
+        $expires = microtime(true) + $timeout;
+    }
+    $cancel = Loop::onWritable($fp, function() use (&$workable, &$cancel) {
+        $workable = true;
+        $cancel();
+    });
+    do {
+        suspend();
+        if (!$workable && $timeout !== null) {
+            if (microtime(true) > $timeout) {
+                // timeout
+                $cancel();
+                return false;
+            }
+        }
+    } while(!$workable);
 }

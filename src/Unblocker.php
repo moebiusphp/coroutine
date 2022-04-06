@@ -17,16 +17,16 @@ class Unblocker {
 
     public $context;
 
-    private int $id;
-    private $fp;
-    private string $mode;
-    private int $options;
-    private ?float $readTimeout = null;
-    private string $writeBuffer = '';
-    private bool $pretendNonBlocking = false;
+    protected int $id;
+    protected $fp;
+    protected string $mode;
+    protected int $options;
+    protected ?float $readTimeout = null;
+    protected string $writeBuffer = '';
+    protected bool $pretendNonBlocking = false;
 
-    private static $resources = [];
-    private static $results = [];
+    protected static $resources = [];
+    protected static $results = [];
 
     /**
      * Check if the provided resource is an unblocked proxy stream, or if
@@ -63,11 +63,11 @@ class Unblocker {
         return $result;
     }
 
-    private static function register(int $flags): void {
+    protected static function register(int $flags): void {
         stream_wrapper_register('moebius-unblocker', self::class, $flags);
     }
 
-    private static function unregister(): void {
+    protected static function unregister(): void {
         stream_wrapper_unregister('moebius-unblocker');
     }
 
@@ -192,7 +192,7 @@ class Unblocker {
         return fwrite($this->fp, $data);
     }
 
-    private static function _interrupt(): void {
+    protected static function _interrupt(): void {
         static $counter = 0;
         if (20 === $counter++) {
             $counter = 0;

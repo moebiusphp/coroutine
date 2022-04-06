@@ -160,7 +160,11 @@ class Unblocker {
                     return true;
                 }
                 return false;
+            default :
+                echo "stream_set_option: unsupported option $option $arg1 $arg2\n";
+                return false;
         }
+        return false;
     }
 
     public function stream_stat(): array|false {

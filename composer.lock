@@ -4,8 +4,86 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "fe625dff5b8c7e8b236d30dd00b14926",
+    "content-hash": "06109d5493f673ed3ef11ca035241f8b",
     "packages": [
+        {
+            "name": "charm/error",
+            "version": "1.0.0",
+            "source": {
+                "type": "git",
+                "url": "https://bitbucket.org/ennerd/charm-error.git",
+                "reference": "6beab61332a8ebdfc42dcec308f098e5d53f1575"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://bitbucket.org/ennerd/charm-error/get/6beab61332a8ebdfc42dcec308f098e5d53f1575.zip",
+                "reference": "6beab61332a8ebdfc42dcec308f098e5d53f1575",
+                "shasum": ""
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Charm\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Frode Borli",
+                    "email": "frode@ennerd.com"
+                }
+            ],
+            "description": "Just an interface, a trait and two exception classes. Ancestor of all charm/* exception classes.",
+            "homepage": "https://bitbucket.org/ennerd/charm-error",
+            "support": {
+                "source": "https://bitbucket.org/ennerd/charm-error/src/6beab61332a8ebdfc42dcec308f098e5d53f1575/?at=1.0.0"
+            },
+            "time": "2021-09-09T10:36:28+00:00"
+        },
+        {
+            "name": "charm/event",
+            "version": "dev-master",
+            "source": {
+                "type": "git",
+                "url": "https://bitbucket.org/ennerd/charm-event.git",
+                "reference": "49ccbf887506bab1483480131149c536c029c9c1"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://bitbucket.org/ennerd/charm-event/get/49ccbf887506bab1483480131149c536c029c9c1.zip",
+                "reference": "49ccbf887506bab1483480131149c536c029c9c1",
+                "shasum": ""
+            },
+            "require": {
+                "charm/error": "^1.0"
+            },
+            "default-branch": true,
+            "type": "library",
+            "autoload": {
+                "classmap": [
+                    "src/"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Frode Borli",
+                    "email": "frode@ennerd.com"
+                }
+            ],
+            "description": "A simple event emitter interface and a trait with the methods 'on', 'off' and 'emit'.",
+            "homepage": "https://bitbucket.org/ennerd/charm-event",
+            "support": {
+                "source": "https://bitbucket.org/ennerd/charm-event/src/49ccbf887506bab1483480131149c536c029c9c1/?at=1.0.0"
+            },
+            "time": "2021-09-14T14:25:25+00:00"
+        },
         {
             "name": "moebius/loop",
             "version": "dev-master",
@@ -278,6 +356,7 @@
     "stability-flags": {
         "moebius/loop": 20,
         "moebius/promise": 20,
+        "charm/event": 20,
         "charm/testing": 20
     },
     "prefer-stable": false,

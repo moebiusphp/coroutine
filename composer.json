@@ -4,7 +4,8 @@
     "type": "library",
     "require": {
         "moebius/loop": "dev-master",
-        "moebius/promise": "dev-master"
+        "moebius/promise": "dev-master",
+        "charm/event": "dev-master"
     },
     "require-dev": {
         "charm/testing": "dev-master"

@@ -3,11 +3,20 @@ namespace Moebius;
 
 use Moebius\Loop;
 use Fiber, WeakMap;
+use Charm\Event\{StaticEventEmitterInterface, StaticEventEmitterTrait};
 
 /**
  * Run a callback in a resumable way.
  */
-class Coroutine extends Promise {
+class Coroutine extends Promise implements StaticEventEmitterInterface {
+    use StaticEventEmitterTrait;
+
+    /**
+     * Hook for integrating with the Coroutine API
+     *
+     * Coroutine::events()->on(Coroutine::BOOTSTRAP_EVENT, function() {});
+     */
+    const BOOTSTRAP_EVENT = self::class.'::BOOTSTRAP_EVENT';
 
     /**
      * Create a new coroutine
@@ -191,5 +200,6 @@ class Coroutine extends Promise {
         }
         self::$fibers = new WeakMap();
         self::$bootstrapped = true;
+        self::events()->emit(self::BOOTSTRAP_EVENT, (object) [], false);
     }
 }

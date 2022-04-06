@@ -7,6 +7,9 @@
         "moebius/promise": "dev-master",
         "charm/event": "dev-master"
     },
+    "suggest": {
+        "moebius/async-file": "Automatically and transparently makes blocking file system operations non-blocking"
+    },
     "require-dev": {
         "charm/testing": "dev-master"
     },

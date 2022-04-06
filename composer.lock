@@ -90,12 +90,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/frodeborli/moebius-loop.git",
-                "reference": "22fb64441eecfea3ef445f32dcc0ce7e964fa30d"
+                "reference": "fbbc437df47421932ef88c807836c9569c90edf9"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/frodeborli/moebius-loop/zipball/22fb64441eecfea3ef445f32dcc0ce7e964fa30d",
-                "reference": "22fb64441eecfea3ef445f32dcc0ce7e964fa30d",
+                "url": "https://api.github.com/repos/frodeborli/moebius-loop/zipball/fbbc437df47421932ef88c807836c9569c90edf9",
+                "reference": "fbbc437df47421932ef88c807836c9569c90edf9",
                 "shasum": ""
             },
             "require": {
@@ -131,9 +131,9 @@
             "description": "An event-loop compatability layer for creating packages that work with other event loop implementations such as ReactPHP or Amphp.",
             "support": {
                 "issues": "https://github.com/frodeborli/moebius-loop/issues",
-                "source": "https://github.com/frodeborli/moebius-loop/tree/0.0.8-alpha"
+                "source": "https://github.com/frodeborli/moebius-loop/tree/0.0.8-beta"
             },
-            "time": "2022-04-04T21:39:26+00:00"
+            "time": "2022-04-06T11:44:21+00:00"
         },
         {
             "name": "moebius/promise",

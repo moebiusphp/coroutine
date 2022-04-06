@@ -154,12 +154,20 @@ class Unblocker {
                 $this->readTimeout = $arg1 + ($arg2 / 1000000);
 
                 return true;
+
             case STREAM_OPTION_WRITE_BUFFER:
                 // The method was called in response to stream_set_write_buffer()
                 if (0 === stream_set_write_buffer($this->fp, $arg2)) {
                     return true;
                 }
                 return false;
+
+            case STREAM_OPTION_READ_BUFFER:
+                if (0 === stream_set_read_buffer($this->fp, $arg2)) {
+                    return true;
+                }
+                return false;
+
             default :
                 echo "stream_set_option: unsupported option $option $arg1 $arg2\n";
                 return false;

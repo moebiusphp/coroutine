@@ -20,7 +20,7 @@ Extremely simple API:
 
 To use these functions directly in your code we suggest importing them to your namespace:
 
-```
+```php
 <?php
     use function M\{run, go, await, unblock, sleep};
 ```
@@ -30,7 +30,7 @@ TLDR:
 
 Automatically non-blocking file system.
 
-```
+```php
 <?php
     use function M\{go, await, unblock, sleep};
 
@@ -47,7 +47,7 @@ Automatically non-blocking file system.
 
 Other non-blocking stream
 
-```
+```php
 <?php
     use function M\{go, await, unblock, sleep};
 
@@ -71,7 +71,7 @@ Other non-blocking stream
 
 Cooperative multitasking with the `M\interrupt()` function.
 
-```
+```php
 <?php
     function lots_of_work() {
         $r = mt_rand(0,9);
@@ -107,7 +107,7 @@ completed at a later time in the request cycle.
 
 For example, in a PSR-15 Server Request Handler:
 
-```
+```php
 <?php
 use Psr\Http\Message\{ServerRequestInterface, ResponseInterface};
 use function M\{run, go, sleep};
@@ -159,7 +159,7 @@ use if you discover any incompatabilities.
 Note that if you're calling these functions with the root namespace prefix, e.g. `\fopen`,
 you have to change that back to `fopen`.
 
-```
+```php
 <?php
     // import any functions that creates stream resources from the M namespace
     use function M\{fopen, fsockopen, file_get_contents, popen, proc_open};
@@ -178,7 +178,7 @@ The `M\unblock($fp): mixed;` function will check if the `$fp` resource is unbloc
 that case it will replace it with a new resource where moebius automatically converts blocking
 operations into asynchronous operations.
 
-```
+```php
 <?php
     // replace the stream resource with another stream resource
 
@@ -191,7 +191,7 @@ If you have some heavy calculation to perform, you should try to call the `M\int
 regularly in your loops. This function allows us to check if your coroutine has exceeded its allowed
 time and let other coroutines perform some work.
 
-```
+```php
 <?php
     function fib(int $n): int {
         \M\interrupt(); // this function call is important
@@ -205,7 +205,7 @@ We try to do as little as possible work inside the interrupt function, but it is
 to call it too much. You can reduce the number of invocations by placing it somewhere else in your 
 code:
 
-```
+```php
 <?php
     function fib(int $n): int {
         // call interrupt only 1/16th of times
@@ -219,7 +219,7 @@ code:
 
 In the particular case of fibonacci, you can even consider doing this:
 
-```
+```php
 <?php
     function fib(int $n): int {
         if ($n < 2) {

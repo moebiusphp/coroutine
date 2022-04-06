@@ -171,6 +171,7 @@ function readable($fp, float $timeout=null): bool {
             }
         }
     } while(!$workable);
+    return true;
 }
 
 
@@ -200,4 +201,5 @@ function writable($fp, float $timeout=null): bool {
             }
         }
     } while(!$workable);
+    return true;
 }

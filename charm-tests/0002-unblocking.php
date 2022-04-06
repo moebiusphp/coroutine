@@ -7,6 +7,10 @@ $fifoLock = tempnam(sys_get_temp_dir(), 'moebius-coroutine-test');
 $fifoFile = $fifoLock.'.fifo';
 
 posix_mkfifo($fifoFile, 0600);
+register_shutdown_function(function() use ($fifoLock, $fifoFile) {
+    unlink($fifoLock);
+    unlink($fifoFile);
+});
 
 // this will not block due to "n"
 $readFP = fopen($fifoFile, 'rn');

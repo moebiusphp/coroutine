@@ -18,6 +18,9 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      */
     const BOOTSTRAP_EVENT = self::class.'::BOOTSTRAP_EVENT';
 
+    const ENTER_COROUTINE = self::class.'::ENTER_COROUTINE';
+    const LEAVE_COROUTINE = self::class.'::LEAVE_COROUTINE';
+
     /**
      * Create a new coroutine
      */
@@ -117,13 +120,15 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
 
         self::$deadline = $startTime + self::$maxTime;
 
-        $this->startContext();
-
         try {
             if ($this->fiber->isSuspended()) {
+                self::events()->emit(self::ENTER_COROUTINE, (object) [ 'coroutine' => $this ], false);
                 $this->lastResult = $this->fiber->resume($this->lastResult);
+                self::events()->emit(self::LEAVE_COROUTINE, (object) [ 'coroutine' => $this ], false);
             } elseif (!$this->fiber->isStarted()) {
+                self::events()->emit(self::ENTER_COROUTINE, (object) [ 'coroutine' => $this ], false);
                 $this->lastResult = $this->fiber->start(...$this->args);
+                self::events()->emit(self::LEAVE_COROUTINE, (object) [ 'coroutine' => $this ], false);
             } else {
                 throw new CoroutineException("Coroutine is in an unexpected state");
             }
@@ -148,7 +153,6 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
             $this->promise->resolve($returnValue);
             return true;
         } else {
-            $this->stopContext();
             $this->runTime += microtime(true) - $startTime;
             Loop::defer($this->run(...));
             return false;
@@ -157,22 +161,6 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
 
     private static function logException(\Throwable $e): void {
         fwrite(STDERR, date('Y-m-d H:i:s').' error '.$e->getMessage().' in '.$e->getFile().':'.$e->getLine()."\n".$e->getTraceAsString()."\n");
-    }
-
-    /**
-     * Context switching: setup the context for the
-     * coroutine.
-     */
-    private function startContext(): void {
-        // TODO
-    }
-
-    /**
-     * Context switching: save the context for the
-     * coroutine.
-     */
-    private function stopContext(): void {
-        // TODO
     }
 
     /**

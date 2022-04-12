@@ -4,7 +4,11 @@ namespace M;
 use Moebius\Promise;
 use Moebius\Coroutine;
 use Moebius\Coroutine\Unblocker;
-use Moebius\Coroutine\RejectedException;
+use Moebius\Coroutine\{
+    RejectedException,
+    InvalidResourceException,
+    InvalidSuspendException
+};
 use Moebius\Loop;
 use Fiber;
 
@@ -121,10 +125,8 @@ function unblock($resource): mixed {
 function suspend(): void {
     if (Coroutine::getCurrent()) {
         Coroutine::suspend();
-    } elseif (Fiber::getCurrent()) {
-        Fiber::suspend();
     } elseif (Loop::isDraining()) {
-        throw new \Exception("suspend called outside of a coroutine while a loop is draining. fix your code!");
+        throw new InvalidSuspendException();
     } else {
         Loop::drain(function() { return true; });
     }
@@ -153,25 +155,33 @@ function interrupt(): void {
  * @return bool             False if timed out and stream is not workable yet
  */
 function readable($fp, float $timeout=null): bool {
-    $workable = false;
+    if (!is_resource($fp)) {
+        throw new InvalidResourceException();
+    }
+    $readable = false;
     if ($timeout !== null) {
         $expires = microtime(true) + $timeout;
     }
-    $cancel = Loop::onReadable($fp, function() use (&$workable, &$cancel) {
-        $workable = true;
+    $cancel = Loop::onReadable($fp, function() use (&$readable, &$cancel) {
+        // the event loop say $fp is writable
+        $readable = true;
+        // remove $fp from event loop
         $cancel();
     });
-    do {
+
+    while (is_resource($fp)) {
         suspend();
-        if (!$workable && $timeout !== null) {
-            if (microtime(true) > $timeout) {
-                // timeout
-                $cancel();
-                return false;
-            }
+        if ($readable) {
+            return true;
         }
-    } while(!$workable);
-    return true;
+        if ($timeout !== null && microtime(true) > $timeout) {
+            // timeout
+            $cancel();
+            return false;
+        }
+    }
+
+    return $readable;
 }
 
 
@@ -183,23 +193,25 @@ function readable($fp, float $timeout=null): bool {
  * @return bool             False if timed out and stream is not workable yet
  */
 function writable($fp, float $timeout=null): bool {
-    $workable = false;
+    $writable = false;
     if ($timeout !== null) {
         $expires = microtime(true) + $timeout;
     }
-    $cancel = Loop::onWritable($fp, function() use (&$workable, &$cancel) {
-        $workable = true;
+    $cancel = Loop::onWritable($fp, function() use (&$cancel, &$writable) {
+        // the event loop say $fp is writable
+        $writable = true;
+        // remove $fp from event loop
         $cancel();
     });
-    do {
+    while (is_resource($fp)) {
         suspend();
-        if (!$workable && $timeout !== null) {
-            if (microtime(true) > $timeout) {
-                // timeout
-                $cancel();
-                return false;
-            }
+        if ($writable) {
+            return true;
+        } elseif ($timeout !== null && microtime(true) > $timeout) {
+            // timeout
+            $cancel();
+            return false;
         }
-    } while(!$workable);
-    return true;
+    }
+    return $writable;
 }

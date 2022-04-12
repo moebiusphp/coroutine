@@ -27,7 +27,13 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
     public static function create(callable $coroutine, mixed ...$args): Promise {
         self::bootstrap();
         $c = new self($coroutine, ...$args);
-        $c->run();
+        if (!self::getCurrent()) {
+            // We'll run the coroutine immediately, because it might return immediately
+            // and that is cheaper
+            $c->run();
+        } else {
+            Loop::defer($c->run(...));
+        }
         return $c->promise;
     }
 

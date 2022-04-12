@@ -14,11 +14,15 @@ use Fiber;
 
 /**
  * Run a coroutine and wait for the return value or an exception
- * to be thrown.
+ * to be thrown. This function is intended to be used to convert
+ * synchronous functions into asynchronous versions according to
+ * this pattern:
  *
  * ```
  * function some_request_handler( $request ) {
- *     return M\run(function() {
+ *     // simulate blocking behavior
+ *     return run(function() {
+ *         // work asynchronously
  *         return new Response(...);
  *     });
  * }

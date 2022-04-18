@@ -18,7 +18,7 @@
             "Moebius\\Coroutine\\": "src/"
         },
         "classmap": ["Coroutine.php"],
-        "files": ["functions.php"]
+        "files": ["functions.php", "exceptions.php"]
     },
     "authors": [
         {
@@ -26,5 +26,10 @@
             "email": "frode@ennerd.com"
         }
     ],
-    "minimum-stability": "beta"
+    "minimum-stability": "beta",
+    "scripts": {
+        "test": [
+            "vendor/bin/charm-testing"
+        ]
+    }
 }

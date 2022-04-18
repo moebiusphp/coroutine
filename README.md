@@ -4,72 +4,293 @@ moebius/coroutine
 True "green threads" (coroutines) for PHP 8.1. No plugins needed. Bringing the concurrency
 style of Go to PHP.
 
-Extremely simple API:
+Deceptivly simple API:
 
- * `M\run($callback)` will run a coroutine and wait for it to finish. Return value and exceptions
-   are thrown.
+ * Import the functions you want to use: `import function M\{go, await, sleep, unblock, run};`
 
- * `M\go($callback)` will run a coroutine, but will not wait for it to finish. Use it in combination
-   with `M\await(...$threads)` if you want to run multiple coroutines concurrently.
+ * Run tasks in parallel with the `go()` function: `$futureResult = go(someMethod(...), 'argument 1', 'argument 2');`.
 
- * `M\await($thread)` will block your function and until the coroutine has finished.
+ * Whenever you need to access the result, use the `await()` function: `$finalResult = await($futureResult);`.
 
- * `M\unblock($fp)` makes streams non-blocking.
+ * If you are working with files or sockets, use the `unblock()` function to get a special context-switching
+   stream: `$fp = unblock(fopen('some-file.txt', 'r'));`. After this you can work with the stream resource
+   and Moebius will automatically switch to other coroutines whenever the main thread is blocked.
 
- * `M\sleep(0.1)` pause the coroutine for 0.1 seconds.
+ * Create a "background task" that runs every N seconds by calling `sleep()`. This special version of `sleep()` will
+   let other coroutines do some work while the main thread is blocked.
 
-To use these functions directly in your code we suggest importing them to your namespace:
+    ```
+    <?php
+    use function M\{go, sleep};
+    go(function() {
+        while (true) {
+            echo date('c')."\n";
+            sleep(5);
+        }
+    });
+    ```
 
-```php
-<?php
-    use function M\{run, go, await, unblock, sleep};
+---
+
+Function reference
+------------------
+
+### M\go and Moebius\Coroutine::go
+
+Creates a coroutine which will run in parallel whenever other scripts are blocked from working.
+
+#### Description
+
+Object-oriented style
+
+```
+public static Moebius\Coroutine::go(callable $callback): Moebius\Coroutine
 ```
 
-TLDR:
------
+Procedural style
 
-Automatically non-blocking file system.
+```
+M\go(callable $callback, mixed ...$args): Moebius\Coroutine
+```
 
-```php
+#### Parameters
+
+ * **callback** A function to run as a coroutine.
+
+ * **args** A list of arguments to pass to the function when it runs
+
+#### Return Values
+
+Returns a future value which can be passed to `M\await` or `Moebius\Coroutine::await` whenever
+you need the return value. The future value is also a promise-like object with a `then` method.
+
+
+### M\await and Moebius\Coroutine::await
+
+Await the result from a future value or a promise without blocking other coroutines.
+
+#### Description
+
+Object-oriented style
+
+```
+public static Moebius\Coroutine::await(object $thenable): mixed
+```
+
+Procedural style
+
+```
+M\await(object $thenable): mixed
+```
+
+#### Parameters
+
+ * **thenable** A coroutine created with `M\go` or `Moebius\Coroutine::go`, or any promise-like
+   object with a `then(onSuccess, onFailure)` method.
+
+#### Return values
+
+Await will return the value that is returned from the coroutine via the `return` statement. If
+the coroutine throws an exception, `M\await` will throw the exception.
+
+
+### M\run and Moebius\Coroutine::run
+
+Combines the `M\go` and `M\await` functions, to simplify writing coroutine-ready functions.
+
+> A function that is coroutine-ready will work in cooperation with other coroutine-ready functions,
+> and will behave like any normal function if the application does not support coroutines.
+
+#### Description
+
+Object-oriented style
+
+```
+public static Moebius\Coroutine::run(callable $callback, mixed ...$args): mixed
+```
+
+Procedural style
+
+```
+M\go(callable $callback, mixed ...$args): mixed
+```
+
+#### Parameters
+
+ * **callback** A function to run as a coroutine.
+
+ * **args** A list of arguments to pass to the function when it runs
+
+#### Return Values
+
+Run will return the value that is returned from the coroutine via the `return` statement. If
+the coroutine throws an exception, `M\run` will throw the exception.
+
+
+### M\readable and Moebius\Coroutine::readable
+
+Allow other coroutines to do work until reading from a stream resource will not block.
+
+#### Description
+
+Object-oriented style
+
+```
+public static Moebius\Coroutine::readable(mixed $resource): void
+```
+
+Procedural style
+
+```
+M\readable(mixed $resource): void
+```
+
+#### Parameters
+
+ * **resource** a stream resource such as those returned by `fopen()`, `fsockopen()` or
+   `proc_open()`.
+
+#### Return Values
+
+No value is returned
+
+
+### M\writable and Moebius\Coroutine::writable
+
+Allow other coroutines to do work until writing to the stream resource will not block.
+
+#### Description
+
+Object-oriented style
+
+```
+public static Moebius\Coroutine::writable(mixed $resource): void
+```
+
+Procedural style
+
+```
+M\writable(mixed $resource): void
+```
+
+#### Parameters
+
+ * **resource** a stream resource such as those returned by `fopen()`, `fsockopen()` or
+   `proc_open()`.
+
+#### Return Values
+
+No value is returned
+
+
+### M\sleep and Moebius\Coroutine::sleep
+
+Pauses the local function execution while allowing other coroutines to proceed with their work.
+
+#### Description
+
+Object-oriented style
+
+```
+public static Moebius\Coroutine::sleep(float $seconds): void
+```
+
+Procedural style
+
+```
+M\sleep(float $seconds): void
+```
+
+#### Parameters
+
+ * **seconds** Number of seconds to pause execution of a function.
+
+#### Return Values
+
+No value is returned
+
+
+### M\suspend and Moebius\Coroutine::suspend
+
+Suspend execution and allow other coroutines to perform some work.
+
+> This function is generally not recommended except in special circumstances, such as monitoring
+> a variable or some other very light-weight task. If you are performing some long-running
+> calculations in PHP - you should avoid invoking the suspend function too much because context
+> switching does take a few microseconds.
+
+#### Parameters
+
+None
+
+#### Return Values
+
+No value is returned
+
+
+---
+
+Examples
+--------
+
+### 100 coroutines in parallel
+
+```
 <?php
-    use function M\{go, await, unblock, sleep};
+    use function M\{go, sleep, await);
 
-    $results = [];
-   
-    for ($i = 0; $i < 10; $i++) {
+    // Hold the result from each job
+    $jobs = [];
 
-        // These will run in parallel
-        go(function() use ($i, &$results) {
-            $results[$i] = file_get_contents('file_number_'.$i);
+    // Launch the jobs with go()
+    for ($i = 0; $i < 100; $i++) {
+        $jobs[] = go(function() {
+            echo "+";
+            sleep(1);
+            echo "-";
+            return microtime(true);
         });
+    }
+
+    // Wait until the jobs are finished with await()
+    foreach ($jobs as $job) {
+        $result = await($job);
+    }
+
+    // One second later, all coroutines have finished in parallel.
+```
+
+### Background tick function every 0.5 seconds
+
+```
+<?php
+    use function M\{go, sleep};
+
+    $backgroundJob = go(function() {
+        while (true) {
+            echo ".";
+            sleep(0.5);
+        }
     });
 ```
 
-Other non-blocking stream
+### Schedule a function to run in 10 seconds
 
-```php
+```
 <?php
-    use function M\{go, await, unblock, sleep};
+    use function M\{go, sleep};
 
-    $stream = fsockopen('www.google.com', 80, $errno, $errstr, 30);
-    if (!$fp) {
-        echo "$errstr ($errno)\n";
-    } else {
-        // IMPORTANT! The `M\unblock()` function makes the stream non-blocking.
-        $fp = unblock($fp);
-
-        // IMPORTANT! The `go()` function will allow the stream to continue
-        go(function() use ($fp) {
-            fwrite($fp, "GET / HTTP/1.1\r\nHost: www.google.com\r\nConnection: Close\r\n\r\n");
-            while (!feof($fp)) {
-                echo fgets($fp, 128);
-            }
-            fclose($fp);
-        });
-    }
+    go(function() {
+        sleep(10;
+        echo "10 seconds have passed\n";
+    });
 ```
 
-Cooperative multitasking with the `M\interrupt()` function.
+### Cooperative multitasking
+
+Long running PHP functions will block the entire process from performing work.
+To enable cooperative multitasking, you can insert a call to the `M\interrupt()`
+function at strategic places.
 
 ```php
 <?php
@@ -117,19 +338,24 @@ class MyController {
      * Example of using moebius/coroutine to perform asynchronouse tasks before returning
      */
     public function handleLoginRequest(ServerRequestInterface $request): ResponseInterface {
+
+        /**
+         * This function will behave as if it is blocking, but *if* this function is called
+         * from within a coroutine, it will automatically allow other coroutines to run.
+         */
+
         return run(function() {
-            // use blocking operations
-            $body = go(function() {
-                return file_get_contents("some_file.txt");
+            $api1Response = go(function() {
+                return HttpClient::get('http://www.example.com/some-api-1');
             });
 
-            $apiResponse = go(function() {
-                return HttpClient::get('http://www.example.com/some-api');
+            $api2Response = go(function() {
+                return HttpClient::get('http://www.example.com/some-api-2');
             });
 
             return $this->json((object) [
-                'file_body' => await($body),            // important to await the responses
-                'api_response' => await($apiResponse),  // important to await the responses
+                'api_1_response' => await($api1Response),       // important to await the responses
+                'api_2_response' => await($api2Response),       // important to await the responses
             ]);
         });
     }
@@ -141,95 +367,57 @@ For library authors
 -------------------
 
 The single most important integration you can do with `moebius/coroutine` is to make your
-stream resources "unblocked". This should not affect your library in any way, except it
-will ensure that other coroutines can perform some work whenever your library would be
-stuck waiting for file operations to complete.
+stream resources "unblocked".
 
-There are three main ways to do this
+This should not affect your library in any way, but will enable coroutines to run whenever
+your stream resource is blocked.
 
-### With the function wrappers
 
-*These functions have not been implemented yet*
+### Use the `M\unblock()` function
 
-If your library uses functions like `file_get_contents` or `fopen` or `fsockopen`, the only
-modification you'll need to do is import alternative implementations of those functions
-from the `M\` namespace. After importing this, please run your unit tests and report back to
-use if you discover any incompatabilities.
+The `M\unblock()` function will take any stream resource and automatically manage it for you
+by wrapping it in a PHP Stream Wrapper.
 
-Note that if you're calling these functions with the root namespace prefix, e.g. `\fopen`,
-you have to change that back to `fopen`.
+This way you do not have to think about blocking or non-blocking stream operations.
 
-```php
-<?php
-    // import any functions that creates stream resources from the M namespace
-    use function M\{fopen, fsockopen, file_get_contents, popen, proc_open};
+Change:
+
+```
+    $fp = fopen('some-resource.txt', 'r');
 ```
 
-### With the unblock() function
+to
 
-*This function has not been implemented yet, pending some refactoring*
-
-If you can't find a function wrapper for your particular function, you should "unblock" your
-stream resource with the `M\unblock()` function. Note that even if you use the unblock function,
-the actual process of opening the resource may still block the entire application. One particular
-example is trying to open a fifo-file in read-only mode, when there are no other writers connected.
-
-The `M\unblock($fp): mixed;` function will check if the `$fp` resource is unblockable and in
-that case it will replace it with a new resource where moebius automatically converts blocking
-operations into asynchronous operations.
-
-```php
-<?php
-    // replace the stream resource with another stream resource
-
-    $fp = M\unblock($fp);
+```
+    $fp = M\unblock(fopen('some-resource.txt', 'rn'));
 ```
 
-### With the interrupt() function
+Notice that we added a small 'n' argument 2 of the fopen call. This has a very small efffect
+on normal files, but with special files such as FIFO-files - it prevents the `fopen()` function
+from blocking.
 
-If you have some heavy calculation to perform, you should try to call the `M\interrupt()` function
-regularly in your loops. This function allows us to check if your coroutine has exceeded its allowed
-time and let other coroutines perform some work.
 
-```php
+### Use `M\file_get_contents()` and `M\file_put_contents()`
+
+The PHP functions `file_get_contents()` and `file_put_contents()` are very common functions
+for reading files. By simply importing these drop-in replacement functions you will automatically
+enable concurrency.
+
+```
 <?php
-    function fib(int $n): int {
-        \M\interrupt(); // this function call is important
-
-        if ($n < 2) return $n;
-        return fib($n - 1) + fib($n - 2);
-    }
+    use M\{file_get_contents, file_put_contents};
 ```
 
-We try to do as little as possible work inside the interrupt function, but it is a waste of resources
-to call it too much. You can reduce the number of invocations by placing it somewhere else in your 
-code:
 
-```php
-<?php
-    function fib(int $n): int {
-        // call interrupt only 1/16th of times
-        if (0 === ($n % 16)) \M\interrupt();
+### With the `M\sleep()` function
 
-        if ($n < 2) return $n;
+If your function is polling for some information, you should replace any calls to `usleep()` or
+`sleep()` with the `M\sleep()` function.
 
-        return fib($n - 1) + fib($n - 2);
-    }
-```
+The `M\sleep()` function is not interrupted by signals and is often more precise than the native
+PHP functions `sleep()` and `usleep()` since it relies on the `hrtime()` function.
 
-In the particular case of fibonacci, you can even consider doing this:
-
-```php
-<?php
-    function fib(int $n): int {
-        if ($n < 2) {
-            \M\interrupt();
-            return $n;
-        }
-
-        return fib($n - 1) + fib($n - 2);
-    }
-```
+`M\sleep()` supports fractional seconds: `usleep(1).` is equivalent to `M\sleep(0.000001);`.
 
 
 Principles
@@ -237,23 +425,9 @@ Principles
 
 Moebius is being developed with a set of clear priorities:
 
- 1. It MUST NOT require developers to make any modifications to their existing code base. 
-    Moebius does NOT require that the project is built using async libraries such as React
-    or Amp.
+ 1. It must allow a gradual transition from traditional blocking code bases. Using Moebius 
+    in a library must not make it incompatible with classic PHP software.
 
- 2. It MUST NOT have any noticeable side-effects on the rest of the application.
+ 2. Moebius must not cause side-effects unless explicitly requested/configured by the application
+    developer.
 
-
-Legacy Code and migration
--------------------------
-
-We're working hard to make moebius/coroutine able to context switch automatically, even
-if there is no built-in support for that elsewhere. We have a working proof of concept
-implementation where all filesystem operations will cause context switching, and we're
-working on a similar implementation for streams.
-
-While we try to avoid it, these extensions may have side effects - so they are optional
-addons which can be installed via composer.
-
-If you are developing a library yourself, you should NOT make them a dependency of your
-library!

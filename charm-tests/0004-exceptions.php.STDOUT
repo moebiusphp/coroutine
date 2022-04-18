@@ -1,0 +1,5 @@
+Throwing a RuntimeException from go()
+RuntimeException caught!
+Throwing a RuntimeException from run()
+RuntimeException caught!
+Tests finished

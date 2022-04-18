@@ -5,8 +5,17 @@ use Charm\Event\{
     StaticEventEmitterInterface,
     StaticEventEmitterTrait
 };
+use Moebius\Coroutine\{
+    Exception,
+    LogicException,
+    RuntimeException,
+    CoroutineExpectedException
+};
 use Fiber, SplMinHeap, Closure;
 
+/**
+ * A coroutine.
+ */
 class Coroutine extends Promise implements StaticEventEmitterInterface {
     use StaticEventEmitterTrait;
 
@@ -18,25 +27,93 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
     const BOOTSTRAP_EVENT = self::class.'::BOOTSTRAP_EVENT';
 
     /**
-     * @type array<int, Coroutine> Coroutines that are currently active
+     * Configurable time window for interrupting coroutines in
+     * nanoseconds.
+     *
+     * @type int
+     */
+    private static int $interruptTimeNS = 100000000;
+
+    /**
+     * Coroutines that are currently active
+     *
+     * @type array<int, Coroutine>
      */
     private static array $coroutines = [];
+
+    /**
+     * Coroutines that are pending an event
+     *
+     * @type array<int, Coroutine>
+     */
     private static array $frozen = [];
 
     /**
-     * @type int Next available coroutine ID
+     * Next available coroutine ID
+     *
+     * @type int
      */
     private static int $nextId = 1;
 
     /**
-     * @type int Tick count increases by one for every tick
+     * Tick count increases by one for every tick
+     *
+     * @type int
      */
     private static int $tickCount = 0;
 
     /**
-     * @type array<callable> Microtasks to run immediately after a fiber suspends, before next fiber resumes
+     * Microtasks to run immediately after a fiber  suspends, before next 
+     * fiber resumes
+     *
+     * @type array<callable>
      */
     private static array $microTasks = [];
+
+    /**
+     * True whenever the coroutine loop is draining. Set this to false
+     * to stop the loop.
+     *
+     * @type bool
+     */
+    private static bool $running = false;
+
+    /**
+     * Fibers that are waiting for a stream resource to become readable.
+     *
+     * @type array<int, resource>
+     */
+    private static array $readableStreams = [];
+
+    /**
+     * Fibers that are waiting for a stream resource to become writable.
+     *
+     * @type array<int, resource>
+     */
+    private static array $writableStreams = [];
+
+    /**
+     * Heap with tasks sorted by the next time they should start. Each
+     * task is inserted as an array [ $nanoTime, $coroutineIdOrCallable ]
+     *
+     * @type SplMinHeap<array{0: int, 1: int|callable}>
+     */
+    private static ?SplMinHeap $timers = null;
+
+    /**
+     * Holds a reference to the currently active coroutine
+     *
+     * @type self
+     */
+    private static ?self $current = null;
+
+    /**
+     * Counts how many coroutines are currently held in memory
+     *
+     * @type int
+     */
+    private static int $instanceCount = 0;
+
 
     /**
      * Run a coroutine and await its result.
@@ -49,26 +126,32 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      * Create and run a coroutine
      */
     public static function go(Closure $coroutine, mixed ...$args): Coroutine {
-        $result = new self($coroutine, $args);
-        return $result;
+        return new self($coroutine, $args);
     }
 
     /**
-     * Await a return value from a coroutine or a promise
+     * Await a return value from a coroutine or a promise, while allowing
+     * other coroutines to perform some work.
+     *
+     * @param object $thenable A coroutine or promise-like object.
      */
     public static function await(object $thenable) {
+        if (!($thenable instanceof self) && !Promise::isThenable($thenable)) {
+            throw new CoroutineExpectedException("Coroutine::await() expects a coroutine or a promise-like object");
+        }
+
         $promiseStatus = null;
         $promiseResult = null;
 
         $thenable->then(function($result) use (&$promiseStatus, &$promiseResult) {
             if ($promiseStatus !== null) {
-                throw new \Exception("Promise is resolved");
+                throw new PromiseResolvedException("Promise is already resolved");
             }
             $promiseStatus = true;
             $promiseResult = $result;
         }, function($reason) use (&$promiseStatus, &$promiseResult) {
             if ($promiseStatus !== null) {
-                throw new \Exception("Promise is resolved");
+                throw new PromiseResolvedException("Promise is already resolved");
             }
             $promiseStatus = false;
             $promiseResult = $reason;
@@ -88,7 +171,7 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
             });
             Fiber::suspend();
         } else {
-            throw new \Exception("Can't await from inside an unknown Fiber");
+            throw new UnknownFiberException("Can't use Coroutine::await() from inside an unknown Fiber");
         }
 
         if ($promiseStatus === true) {
@@ -99,10 +182,18 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
             }
             throw $promiseResult;
         } else {
-            throw new \Exception("Promise did not resolve");
+            throw new LogicException("Promise did not resolve");
         }
     }
 
+    /**
+     * Suspend the current coroutine until reading from a stream resource will
+     * not block.
+     *
+     * @param resource $resource    The stream resource
+     * @param ?float $timeout       An optional timeout in seconds
+     * @return bool                 false if the stream is no readable (timed out)
+     */
     public static function readable(mixed $resource, float $timeout=null): bool {
         if ($timeout !== null) {
             $timeout = hrtime(true) + (1000000000 * $timeout) | 0;
@@ -147,6 +238,14 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
         }
     }
 
+    /**
+     * Suspend the current coroutine until writing to a stream resource will
+     * not block.
+     *
+     * @param resource $resource    The stream resource
+     * @param ?float $timeout       An optional timeout in seconds
+     * @return bool                 false if the stream is no readable (timed out)
+     */
     public static function writable(mixed $resource, float $timeout=null): bool {
         if ($timeout !== null) {
             $timeout = hrtime(true) + (1000000000 * $timeout) | 0;
@@ -191,6 +290,12 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
         }
     }
 
+    /**
+     * Suspend the current coroutine for a number of seconds. When called from outside
+     * of a coroutine, run coroutines for a number of seconds.
+     *
+     * @param float $seconds Number of seconds to sleep
+     */
     public static function sleep(float $seconds): void {
         $expires = hrtime(true) + ($seconds * 1000000000) | 0;
         if ($co = self::getCurrent()) {
@@ -205,9 +310,42 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
         }
     }
 
+    /**
+     * Provide an opportunity for the current coroutine to be suspended. The coroutine
+     * will only be suspended if the interrupt time slice has been exceeded.
+     *
+     * @see self::suspend()
+     */
+    public static function interrupt(): void {
+        if (self::$current && (hrtime(true) - self::$current->startTimeNS) > self::$interruptTimeNS) {
+            self::suspend();
+        }
+    }
+
+    /**
+     * Suspend the current coroutine until the next tick. When called from outside of a
+     * coroutine, run one tick of coroutines.
+     */
+    public static function suspend(): void {
+        if (!self::$current) {
+            self::tick(false);
+        } elseif (self::$current->fiber === Fiber::getCurrent()) {
+            Fiber::suspend();
+        } else {
+            throw new UnknownFiberException("Call to Coroutine::suspend() from an unknown Fiber");
+        }
+    }
+
+    /**
+     * Resolve scheduled timers and readable/writable stream resources then run
+     * the coroutines
+     *
+     * @param bool $maySleep    If false, do not sleep.
+     * @return int              The number of unfinished coroutines that are being managed
+     */
     private static function tick(bool $maySleep=true): int {
         if (Fiber::getCurrent()) {
-            throw new \Exception("Can't run Coroutine::tick() from within a Fiber. This is a bug.");
+            throw new LogicException("Can't run Coroutine::tick() from within a Fiber. This is a bug.");
         }
 
         /**
@@ -291,22 +429,17 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
             usleep($remainingTime);
         }
 
+        self::$tickCount++;
+
         return count(self::$readableStreams) + count(self::$writableStreams) + count(self::$coroutines) + count(self::$timers);
     }
 
-    public static function suspend(): void {
-        if (!self::$current) {
-            self::tick(false);
-        } elseif (self::$current->fiber === Fiber::getCurrent()) {
-            Fiber::suspend();
-        } else {
-            throw new \Exception("Can't suspend this fiber");
-        }
-    }
-
+    /**
+     * Run all coroutines until there are no more coroutines to run.
+     */
     private static function finish(): void {
         if (self::$running) {
-            throw new \Exception("Coroutines are already running");
+            throw new LogicException("Coroutines are already running");
         }
         if (self::$current) {
             // die or a fatal exception inside a coroutine
@@ -323,16 +456,23 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
         self::$running = false;
     }
 
+    /**
+     * Get the current coroutine and check that there is no other
+     * Fiber being executed.
+     */
     private static function getCurrent(): ?self {
         if (self::$current === null) {
             return null;
         }
         if (self::$current->fiber !== Fiber::getCurrent()) {
-            throw new \Exception("Can't use Coroutine API from external Fiber instances");
+            throw new UnknownFiberException("Can't use Coroutine API to manage unknown Fiber instances");
         }
         return self::$current;
     }
 
+    /**
+     * Initialize the Coroutine class.
+     */
     public static function bootstrap(): void {
         static $bootstrapped = false;
         if ($bootstrapped) {
@@ -344,36 +484,60 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
         self::events()->emit(self::BOOTSTRAP_EVENT, (object) [], false);
     }
 
-    // Is the event loop currently running?
-    private static bool $running = false;
-
     /**
-     * @type array<int, resource> Fiber ID that are waiting for a stream resource to become readable.
+     * Every fiber instance receives a unique ID number which is used
+     * to schedule timers and track IO events.
      */
-    private static array $readableStreams = [];
-
-    /**
-     * @type array<int, resource> Fiber ID that are waiting for a stream resource to become writable.
-     */
-    private static array $writableStreams = [];
-
-    /**
-     * @type SplMinHeap<array{0: int, 1: int}> Heap of [ nanotime, coroutineId ] scheduled to after a particular hrtime()
-     */
-    private static ?SplMinHeap $timers = null;
-
-    // Reference to the currently active coroutine
-    private static ?self $current = null;
-
-    // Counts the number of Coroutine instances in memory
-    private static int $instanceCount = 0;
-
     private int $id;
+
+    /**
+     * A reference to the Fiber instance
+     */
     private Fiber $fiber;
+
+    /**
+     * Holds the function arguments until the coroutine starts.
+     */
     private ?array $args = null;
+
+    /**
+     * The value that will be sent to the fiber the next time it
+     * is going to run.
+     */
     private mixed $last = null;
+
+    /**
+     * True if the value for the fiber is an exception that should
+     * be thrown.
+     */
     private bool $wasError = false;
 
+    /**
+     * Tracks the total time spent in the function in nanoseconds.
+     * Large numbers indicates that the function is blocking, or using
+     * blocking functions.
+     */
+    private int $totalTimeNS = 0;
+
+    /**
+     * Tracks the last time the function was invoked according to the
+     * `hrtime(true)` function call.
+     */
+    private int $startTimeNS = 0;
+
+    /**
+     * Tracks the longest step duration for this function.
+     */
+    private int $longestStepTimeNS = 0;
+
+    /**
+     * Tracks the number of iterations this function has performed.
+     */
+    private int $stepCount = 0;
+
+    /**
+     * Create a new coroutine instance and add it to the coroutine loop
+     */
     private function __construct(Closure $coroutine, array $args) {
         self::$instanceCount++;
         $this->id = self::$nextId++;
@@ -383,10 +547,11 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
     }
 
     /**
-     * Make one step of progress.
+     * Run the coroutine for one iteration.
      */
     private function step(): void {
         try {
+            $this->startTimeNS = hrtime(true);
             if ($this->fiber->isSuspended()) {
                 if ($this->wasError) {
                     $this->wasError = false;
@@ -401,25 +566,40 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
                 $this->args = null;
                 $this->last = $this->fiber->start(...$args);
             } elseif ($this->fiber->isTerminated()) {
-                throw new \Exception("Coroutine is terminated");
+                throw new LogicException("Coroutine is terminated");
             } elseif ($this->fiber->isRunning()) {
-                throw new \Exception("Coroutine is running");
+                throw new LogicException("Coroutine is running");
             } else {
-                throw new \Exception("Coroutine in unknown state");
+                throw new LogicException("Coroutine in unknown state");
             }
+
+            $stepTimeNS = hrtime(true) - $this->startTimeNS;
+            $this->totalTimeNS += $stepTimeNS;
+            $this->longestStepTimeNS = max($stepTimeNS, $this->longestStepTimeNS);
+            $this->stepCount++;
+
             if ($this->fiber->isTerminated()) {
                 unset(self::$coroutines[$this->id]);
                 $this->resolve($this->fiber->getReturn());
             }
         } catch (\Throwable $e) {
+            unset(self::$coroutines[$this->id]);
             $this->reject($e);
         }
     }
 
+    /**
+     * The coroutine has terminated
+     */
     public function __destruct() {
         self::$instanceCount--;
     }
 
+    /**
+     * Helper function for debugging memory leaks and whatnot.
+     *
+     * @internal
+     */
     public static function dumpStats(): void {
         echo "STATS: instances=".self::$instanceCount." active=".count(self::$coroutines)." rs=".count(self::$readableStreams)." ws=".count(self::$readableStreams)." frozen=".count(self::$frozen)."\n";
     }

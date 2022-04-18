@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "147c2858daf3319e135562631398c436",
+    "content-hash": "a8202974773e38a796bb6a9a1104c8fd",
     "packages": [
         {
             "name": "charm/error",
@@ -45,22 +45,21 @@
         },
         {
             "name": "charm/event",
-            "version": "dev-master",
+            "version": "1.0.0",
             "source": {
                 "type": "git",
                 "url": "https://bitbucket.org/ennerd/charm-event.git",
-                "reference": "89f76564e777ab7d73d7ce5e4fe8a760db02c370"
+                "reference": "49ccbf887506bab1483480131149c536c029c9c1"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://bitbucket.org/ennerd/charm-event/get/89f76564e777ab7d73d7ce5e4fe8a760db02c370.zip",
-                "reference": "89f76564e777ab7d73d7ce5e4fe8a760db02c370",
+                "url": "https://bitbucket.org/ennerd/charm-event/get/49ccbf887506bab1483480131149c536c029c9c1.zip",
+                "reference": "49ccbf887506bab1483480131149c536c029c9c1",
                 "shasum": ""
             },
             "require": {
                 "charm/error": "^1.0"
             },
-            "default-branch": true,
             "type": "library",
             "autoload": {
                 "classmap": [
@@ -80,9 +79,9 @@
             "description": "A simple event emitter interface and a trait with the methods 'on', 'off' and 'emit'.",
             "homepage": "https://bitbucket.org/ennerd/charm-event",
             "support": {
-                "source": "https://bitbucket.org/ennerd/charm-event/src/89f76564e777ab7d73d7ce5e4fe8a760db02c370/?at=1.0.1"
+                "source": "https://bitbucket.org/ennerd/charm-event/src/49ccbf887506bab1483480131149c536c029c9c1/?at=1.0.0"
             },
-            "time": "2022-04-08T20:43:09+00:00"
+            "time": "2021-09-14T14:25:25+00:00"
         },
         {
             "name": "moebius/promise",
@@ -131,7 +130,7 @@
     "packages-dev": [
         {
             "name": "charm/options",
-            "version": "dev-master",
+            "version": "1.0.7",
             "source": {
                 "type": "git",
                 "url": "https://bitbucket.org/ennerd/charm-options.git",
@@ -143,7 +142,6 @@
                 "reference": "9b0fed12af4fcc83dc350358dd83cd440953dbff",
                 "shasum": ""
             },
-            "default-branch": true,
             "type": "library",
             "autoload": {
                 "files": [
@@ -172,23 +170,22 @@
         },
         {
             "name": "charm/terminal",
-            "version": "dev-master",
+            "version": "1.0.7",
             "source": {
                 "type": "git",
                 "url": "https://bitbucket.org/ennerd/terminal.git",
-                "reference": "af5cc7df87365e954987e1b0b4f9c3478f64897f"
+                "reference": "5441b2d5a537570acd264a18c31a47ef50e94418"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://bitbucket.org/ennerd/terminal/get/af5cc7df87365e954987e1b0b4f9c3478f64897f.zip",
-                "reference": "af5cc7df87365e954987e1b0b4f9c3478f64897f",
+                "url": "https://bitbucket.org/ennerd/terminal/get/5441b2d5a537570acd264a18c31a47ef50e94418.zip",
+                "reference": "5441b2d5a537570acd264a18c31a47ef50e94418",
                 "shasum": ""
             },
             "require": {
                 "charm/options": ">=1.0.6",
                 "charm/util-phpencode": ">=1.0.2"
             },
-            "default-branch": true,
             "type": "library",
             "autoload": {
                 "files": [
@@ -214,9 +211,9 @@
             "description": "Organized and colorful command line output through a simple markup language.",
             "homepage": "https://bitbucket.org/ennerd/terminal",
             "support": {
-                "source": "https://bitbucket.org/ennerd/terminal/src/af5cc7df87365e954987e1b0b4f9c3478f64897f/?at=master"
+                "source": "https://bitbucket.org/ennerd/terminal/src/5441b2d5a537570acd264a18c31a47ef50e94418/?at=1.0.7"
             },
-            "time": "2022-04-08T20:40:39+00:00"
+            "time": "2022-04-08T20:40:08+00:00"
         },
         {
             "name": "charm/testing",
@@ -302,9 +299,8 @@
         }
     ],
     "aliases": [],
-    "minimum-stability": "dev",
+    "minimum-stability": "beta",
     "stability-flags": {
-        "charm/event": 20,
         "charm/testing": 20
     },
     "prefer-stable": false,

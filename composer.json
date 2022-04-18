@@ -4,7 +4,7 @@
     "type": "library",
     "require": {
         "moebius/promise": "^1.0",
-        "charm/event": "dev-master"
+        "charm/event": "^1.0"
     },
     "suggest": {
         "moebius/async-file": "Automatically and transparently makes blocking file system operations non-blocking"
@@ -26,5 +26,5 @@
             "email": "frode@ennerd.com"
         }
     ],
-    "minimum-stability": "dev"
+    "minimum-stability": "beta"
 }

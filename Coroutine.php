@@ -148,13 +148,15 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
     }
 
     public static function writable(mixed $resource, float $timeout=null): bool {
-        $valid = true;
+        if ($timeout !== null) {
+            $timeout = hrtime(true) + (1000000000 * $timeout) | 0;
+        }
 
         if ($co = self::getCurrent()) {
+            $valid = true;
             if ($timeout !== null) {
-                $timeout = hrtime(true) + (1000000000 * $timeout) | 0;
                 self::$timers->insert([$timeout, function() use ($co, &$valid) {
-                    if ($valid === true) {
+                    if (!$valid) {
                         return;
                     }
                     $valid = false;
@@ -162,15 +164,18 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
                     unset(self::$frozen[$co->id]);
                     unset(self::$writableStreams[$co->id]);
                 }]);
-            }
-
+            };
             self::$writableStreams[$co->id] = $resource;
             self::$frozen[$co->id] = $co;
             unset(self::$coroutines[$co->id]);
             Fiber::suspend();
+            return $valid;
         } else {
+            $valid = true;
             if ($timeout !== null) {
-                $timeout = hrtime(true) + (1000000000 * $timeout) | 0;
+                self::$timers->insert([$timeout, function() use (&$valid) {
+                    $valid = false;
+                }]);
             }
             do {
                 if (self::tick(false) > 0) {
@@ -182,8 +187,8 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
                 $void = [];
                 $count = stream_select($void, $writableStreams, $void, 0, $sleepTime);
             } while ($count === 0 && $valid);
+            return $valid;
         }
-        return $valid;
     }
 
     public static function sleep(float $seconds): void {

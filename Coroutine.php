@@ -26,6 +26,8 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      */
     const BOOTSTRAP_EVENT = self::class.'::BOOTSTRAP_EVENT';
 
+    private static bool $debug = false;
+
     /**
      * Configurable time window for interrupting coroutines in
      * nanoseconds.
@@ -192,7 +194,7 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      *
      * @param resource $resource    The stream resource
      * @param ?float $timeout       An optional timeout in seconds
-     * @return bool                 false if the stream is no readable (timed out)
+     * @return bool                 false if the stream is not readable (timed out or closed)
      */
     public static function readable(mixed $resource, float $timeout=null): bool {
         if ($timeout !== null) {
@@ -216,6 +218,9 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
             self::$frozen[$co->id] = $co;
             unset(self::$coroutines[$co->id]);
             Fiber::suspend();
+            if ($valid && !is_resource($resource)) {
+                return false;
+            }
             return $valid;
         } else {
             $valid = true;
@@ -229,6 +234,9 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
                     $sleepTime = 0;
                 } else {
                     $sleepTime = 50000;
+                }
+                if (!is_resource($resource)) {
+                    return false;
                 }
                 $readableStreams = [ $resource ];
                 $void = [];
@@ -268,6 +276,9 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
             self::$frozen[$co->id] = $co;
             unset(self::$coroutines[$co->id]);
             Fiber::suspend();
+            if ($valid && !is_resource($resource)) {
+                return false;
+            }
             return $valid;
         } else {
             $valid = true;
@@ -281,6 +292,9 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
                     $sleepTime = 0;
                 } else {
                     $sleepTime = 50000;
+                }
+                if (!is_resource($resource)) {
+                    return false;
                 }
                 $writableStreams = [ $resource ];
                 $void = [];
@@ -344,6 +358,9 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      * @return int              The number of unfinished coroutines that are being managed
      */
     private static function tick(bool $maySleep=true): int {
+        if (self::$debug) {
+            self::dumpStats(false);
+        }
         if (Fiber::getCurrent()) {
             throw new LogicException("Can't run Coroutine::tick() from within a Fiber. This is a bug.");
         }
@@ -478,6 +495,9 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
         if ($bootstrapped) {
             return;
         }
+        if (getenv('DEBUG')) {
+            self::$debug = true;
+        }
         $bootstrapped = true;
         self::$timers = new SplMinHeap();
         register_shutdown_function(self::finish(...));
@@ -593,6 +613,10 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      */
     public function __destruct() {
         self::$instanceCount--;
+        if (self::$debug) {
+            self::dumpStats();
+            fwrite(STDERR, "coroutine stats: total-time=".($this->totalTimeNS/1000000000)."\n");
+        }
     }
 
     /**
@@ -600,8 +624,8 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      *
      * @internal
      */
-    public static function dumpStats(): void {
-        echo "STATS: instances=".self::$instanceCount." active=".count(self::$coroutines)." rs=".count(self::$readableStreams)." ws=".count(self::$readableStreams)." frozen=".count(self::$frozen)."\n";
+    private static function dumpStats(bool $nl=true): void {
+        fwrite(STDERR, "global stats: instances=".self::$instanceCount." active=".count(self::$coroutines)." rs=".count(self::$readableStreams)." ws=".count(self::$readableStreams)." frozen=".count(self::$frozen).($nl ? "\n" : "\r"));
     }
 
 }

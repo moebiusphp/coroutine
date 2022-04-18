@@ -2,6 +2,7 @@
 require(__DIR__.'/../vendor/autoload.php');
 
 use Moebius\Coroutine\Unblocker;
+use Moebius\Coroutine as Co;
 
 $fifoLock = tempnam(sys_get_temp_dir(), 'moebius-coroutine-test');
 $fifoFile = $fifoLock.'.fifo';
@@ -19,18 +20,20 @@ $readFP = fopen($fifoFile, 'rn');
 $readFP = Unblocker::unblock($readFP);
 
 // this should happen
-Moebius\Loop::defer(function() {
+Co::go(function() {
     echo "2 (because of blocking fread)\n";
 });
 
-Moebius\Loop::setTimeout(function() {
+Co::go(function() {
+    Co::sleep(0.5);
     echo "4 (blocking read should be done)\n";
     die();
-}, 0.1);
+});
 
-Moebius\Loop::setTimeout(function() {
+Co::go(function() {
+    Co::sleep(1.0);
     echo "Never happens because of die() called in previous timeout\n";
-}, 0.2);
+});
 
 stream_set_blocking($readFP, false);
 

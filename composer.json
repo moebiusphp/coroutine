@@ -3,8 +3,7 @@
     "description": "Easy to use coroutines for PHP.",
     "type": "library",
     "require": {
-        "moebius/loop": "dev-master",
-        "moebius/promise": "dev-master",
+        "moebius/promise": "^1.0",
         "charm/event": "dev-master"
     },
     "suggest": {

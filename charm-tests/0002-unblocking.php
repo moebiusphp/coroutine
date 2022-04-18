@@ -2,6 +2,7 @@
 require(__DIR__.'/../vendor/autoload.php');
 
 use Moebius\Coroutine\Unblocker;
+use Moebius\Coroutine as Co;
 
 $fifoLock = tempnam(sys_get_temp_dir(), 'moebius-coroutine-test');
 $fifoFile = $fifoLock.'.fifo';
@@ -19,15 +20,18 @@ $readFP = fopen($fifoFile, 'rn');
 $readFP = Unblocker::unblock($readFP);
 
 // this should happen
-Moebius\Loop::defer(function() {
+Co::go(function() {
     echo "Since we've unblocked the stream, this should get printed\n";
 });
-Moebius\Loop::setTimeout(function() {
+
+Co::go(function() {
+    Co::sleep(0.2);
     echo "Prevent the test from running forever\n";
     die();
-}, 0.2);
+});
 
 $line = fread($readFP, 4096);
+
 var_dump($line);
 
 echo "This should not get printed\n";

@@ -1,8 +1,12 @@
 <?php
 namespace M;
 
-use Moebius\Coroutine as Co;
+use Moebius\Promise;
+use Moebius\Coroutine;
 use Moebius\Coroutine\Unblocker;
+use Moebius\Coroutine\RejectedException;
+use Moebius\Loop;
+use Fiber;
 
 /**
  * Run a coroutine and wait for the return value or an exception
@@ -22,7 +26,7 @@ use Moebius\Coroutine\Unblocker;
  * @throws \Throwable
  */
 function run(callable $coroutine, mixed ...$args): mixed {
-    return Co::run($coroutine, ...$args);
+    return await(go($coroutine, ...$args));
 }
 
 /**
@@ -39,8 +43,8 @@ function run(callable $coroutine, mixed ...$args): mixed {
  * @param mixed ...$args The function arguments
  * @return Promise Returns a promise of the return value from the coroutine
  */
-function go(callable $coroutine, mixed ...$args): Co {
-    return Co::go($coroutine, ...$args);
+function go(callable $coroutine, mixed ...$args): Promise {
+    return Coroutine::create($coroutine, ...$args);
 }
 
 /**
@@ -52,7 +56,31 @@ function go(callable $coroutine, mixed ...$args): Co {
  * @throws \Throwable Any exception cast from the coroutine/promise
  */
 function await(object $thenable): mixed {
-    return Co::await($thenable);
+    if (!Promise::isThenable($thenable)) {
+        // This is not a promise, so we'll treat it as a value that can be used
+        // immediately
+        return $thenable;
+    }
+    $resolved = null;
+    $value = null;
+    $thenable->then(function($result) use (&$resolved, &$value) {
+        $resolved = true;
+        $value = $result;
+    }, function($reason) use (&$resolved, &$value) {
+        $resolved = false;
+        $value = $reason;
+    });
+    while ($resolved === null) {
+        suspend();
+    }
+    if ($resolved === true) {
+        // we have a result
+        return $value;
+    } elseif ($value instanceof \Throwable) {
+        throw $value;
+    } else {
+        throw new RejectedException($value);
+    }
 }
 
 /**
@@ -65,7 +93,10 @@ function sleep(float $duration): void {
     if ($duration <= 0) {
         throw new \RangeException("\M\sleep() requires duration greater then 0");
     }
-    Co::sleep($duration);
+    $timeout = microtime(true) + $duration;
+    do {
+        suspend();
+    } while($timeout > microtime(true));
 }
 
 /**
@@ -88,7 +119,15 @@ function unblock($resource): mixed {
  * as `sleep()` or if you're monitoring a PHP value or promise.
  */
 function suspend(): void {
-    Co::suspend();
+    if (Coroutine::getCurrent()) {
+        Coroutine::suspend();
+    } elseif (Fiber::getCurrent()) {
+        Fiber::suspend();
+    } elseif (Loop::isDraining()) {
+        throw new \Exception("suspend called outside of a coroutine while a loop is draining. fix your code!");
+    } else {
+        Loop::drain(function() { return true; });
+    }
 }
 
 /**
@@ -102,7 +141,7 @@ function interrupt(): void {
     // optimization to reduce the overhead
     if ($callCount++ === 100) {
         $callCount = 0;
-        Co::interrupt();
+        Coroutine::interrupt();
     }
 }
 
@@ -114,7 +153,25 @@ function interrupt(): void {
  * @return bool             False if timed out and stream is not workable yet
  */
 function readable($fp, float $timeout=null): bool {
-    return Co::readable($fp, $timeout);
+    $workable = false;
+    if ($timeout !== null) {
+        $expires = microtime(true) + $timeout;
+    }
+    $cancel = Loop::onReadable($fp, function() use (&$workable, &$cancel) {
+        $workable = true;
+        $cancel();
+    });
+    do {
+        suspend();
+        if (!$workable && $timeout !== null) {
+            if (microtime(true) > $timeout) {
+                // timeout
+                $cancel();
+                return false;
+            }
+        }
+    } while(!$workable);
+    return true;
 }
 
 
@@ -126,5 +183,23 @@ function readable($fp, float $timeout=null): bool {
  * @return bool             False if timed out and stream is not workable yet
  */
 function writable($fp, float $timeout=null): bool {
-    return Co::writable($fp, $timeout);
+    $workable = false;
+    if ($timeout !== null) {
+        $expires = microtime(true) + $timeout;
+    }
+    $cancel = Loop::onWritable($fp, function() use (&$workable, &$cancel) {
+        $workable = true;
+        $cancel();
+    });
+    do {
+        suspend();
+        if (!$workable && $timeout !== null) {
+            if (microtime(true) > $timeout) {
+                // timeout
+                $cancel();
+                return false;
+            }
+        }
+    } while(!$workable);
+    return true;
 }

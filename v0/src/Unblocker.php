@@ -1,7 +1,12 @@
 <?php
 namespace Moebius\Coroutine;
 
-use Moebius\Coroutine as Co;
+use function M\{
+    interrupt,
+    suspend,
+    readable,
+    writable
+};
 
 /**
  * This class will proxy a stream to ensure automatic context switching
@@ -99,7 +104,7 @@ class Unblocker {
 
     public function stream_lock(int $operation): bool {
         if ($this->pretendNonBlocking) {
-            Co::suspend();
+            suspend();
             return flock($this->fp, $operation | LOCK_NB);
         }
         while (!flock($this->fp, $operation | LOCK_NB, $would_block)) {
@@ -108,7 +113,7 @@ class Unblocker {
                 self::_interrupt();
                 return false;
             }
-            Co::suspend();
+            suspend();
         }
         return true;
     }
@@ -119,12 +124,12 @@ class Unblocker {
 
     public function stream_read(int $count): string|false {
         if ($this->pretendNonBlocking) {
-            if (!Co::readable($this->fp, 0)) {
+            if (!readable($this->fp, 0)) {
                 return '';
             }
             return fread($this->fp, $count);
         }
-        if (!Co::readable($this->fp, $this->readTimeout)) {
+        if (!readable($this->fp, $this->readTimeout)) {
             // timed out
             return false;
         }
@@ -187,12 +192,12 @@ class Unblocker {
 
     public function stream_write(string $data): int {
         if ($this->pretendNonBlocking) {
-            if (!Co::writable($this->fp, 0)) {
+            if (!writable($this->fp, 0)) {
                 return 0;
             }
             return fread($this->fp, $count);
         }
-        if (!Co::writable($this->fp, $this->readTimeout)) {
+        if (!writable($this->fp, $this->readTimeout)) {
             // timed out
             return 0;
         }
@@ -203,7 +208,7 @@ class Unblocker {
         static $counter = 0;
         if (20 === $counter++) {
             $counter = 0;
-            Co::interrupt();
+            interrupt();
         }
     }
 }

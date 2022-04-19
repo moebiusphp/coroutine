@@ -197,6 +197,7 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      * @return bool                 false if the stream is not readable (timed out or closed)
      */
     public static function readable(mixed $resource, float $timeout=null): bool {
+        self::bootstrap();
         if ($timeout !== null) {
             $timeout = hrtime(true) + (1000000000 * $timeout) | 0;
         }
@@ -255,6 +256,7 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      * @return bool                 false if the stream is no readable (timed out)
      */
     public static function writable(mixed $resource, float $timeout=null): bool {
+        self::bootstrap();
         if ($timeout !== null) {
             $timeout = hrtime(true) + (1000000000 * $timeout) | 0;
         }
@@ -311,6 +313,7 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      * @param float $seconds Number of seconds to sleep
      */
     public static function sleep(float $seconds): void {
+        self::bootstrap();
         $expires = hrtime(true) + ($seconds * 1000000000) | 0;
         if ($co = self::getCurrent()) {
             self::$timers->insert([$expires, $co->id]);
@@ -358,6 +361,7 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      * @return int              The number of unfinished coroutines that are being managed
      */
     private static function tick(bool $maySleep=true): int {
+        self::bootstrap();
         if (self::$debug) {
             self::dumpStats(false);
         }
@@ -562,6 +566,7 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      * Create a new coroutine instance and add it to the coroutine loop
      */
     private function __construct(Closure $coroutine, array $args) {
+        self::bootstrap();
         self::$instanceCount++;
         $this->id = self::$nextId++;
         self::$coroutines[$this->id] = $this;
@@ -654,5 +659,3 @@ echo "\$errorMessage $file $line\n";
     }
 
 }
-
-Coroutine::bootstrap();

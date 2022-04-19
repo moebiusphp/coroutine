@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "a8202974773e38a796bb6a9a1104c8fd",
+    "content-hash": "e59f39a5083a4d3a7c1fe7940825f9dd",
     "packages": [
         {
             "name": "charm/error",
@@ -85,20 +85,20 @@
         },
         {
             "name": "moebius/promise",
-            "version": "1.0.0-beta",
+            "version": "1.0.0-RC1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/frodeborli/moebius-promise.git",
-                "reference": "2beb97a2dd5bbdf48c75ea8c4b9203558cb5924f"
+                "reference": "4b0dc3c93d2c46b9b2cc9ecc635589207f209e6a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/frodeborli/moebius-promise/zipball/2beb97a2dd5bbdf48c75ea8c4b9203558cb5924f",
-                "reference": "2beb97a2dd5bbdf48c75ea8c4b9203558cb5924f",
+                "url": "https://api.github.com/repos/frodeborli/moebius-promise/zipball/4b0dc3c93d2c46b9b2cc9ecc635589207f209e6a",
+                "reference": "4b0dc3c93d2c46b9b2cc9ecc635589207f209e6a",
                 "shasum": ""
             },
             "require-dev": {
-                "charm/testing": "dev-master"
+                "charm/testing": ">=0"
             },
             "type": "library",
             "autoload": {
@@ -122,24 +122,24 @@
             "description": "A promise implementation for PHP.",
             "support": {
                 "issues": "https://github.com/frodeborli/moebius-promise/issues",
-                "source": "https://github.com/frodeborli/moebius-promise/tree/1.0.0-beta"
+                "source": "https://github.com/frodeborli/moebius-promise/tree/1.0.0-RC1"
             },
-            "time": "2022-04-18T00:53:53+00:00"
+            "time": "2022-04-19T21:32:02+00:00"
         }
     ],
     "packages-dev": [
         {
             "name": "charm/options",
-            "version": "1.0.7",
+            "version": "1.0.8",
             "source": {
                 "type": "git",
                 "url": "https://bitbucket.org/ennerd/charm-options.git",
-                "reference": "9b0fed12af4fcc83dc350358dd83cd440953dbff"
+                "reference": "a11bdda40fca0d8f6c711d8eb2d5eb8a42e91f3d"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://bitbucket.org/ennerd/charm-options/get/9b0fed12af4fcc83dc350358dd83cd440953dbff.zip",
-                "reference": "9b0fed12af4fcc83dc350358dd83cd440953dbff",
+                "url": "https://bitbucket.org/ennerd/charm-options/get/a11bdda40fca0d8f6c711d8eb2d5eb8a42e91f3d.zip",
+                "reference": "a11bdda40fca0d8f6c711d8eb2d5eb8a42e91f3d",
                 "shasum": ""
             },
             "type": "library",
@@ -164,9 +164,9 @@
             "description": "A generic class for storing options while enforcing option types.",
             "homepage": "https://bitbucket.org/ennerd/charm-options",
             "support": {
-                "source": "https://bitbucket.org/ennerd/charm-options/src/9b0fed12af4fcc83dc350358dd83cd440953dbff/?at=1.0.7"
+                "source": "https://bitbucket.org/ennerd/charm-options/src/a11bdda40fca0d8f6c711d8eb2d5eb8a42e91f3d/?at=1.0.8"
             },
-            "time": "2022-04-12T09:48:15+00:00"
+            "time": "2022-04-18T21:01:37+00:00"
         },
         {
             "name": "charm/terminal",
@@ -217,7 +217,7 @@
         },
         {
             "name": "charm/testing",
-            "version": "dev-master",
+            "version": "0.0.9",
             "source": {
                 "type": "git",
                 "url": "https://bitbucket.org/ennerd/charm-testing.git",
@@ -233,7 +233,6 @@
                 "charm/terminal": ">=1.0.6",
                 "charm/util-phpencode": "^1.0"
             },
-            "default-branch": true,
             "bin": [
                 "bin/charm-testing"
             ],
@@ -299,11 +298,9 @@
         }
     ],
     "aliases": [],
-    "minimum-stability": "beta",
-    "stability-flags": {
-        "charm/testing": 20
-    },
-    "prefer-stable": false,
+    "minimum-stability": "RC",
+    "stability-flags": [],
+    "prefer-stable": true,
     "prefer-lowest": false,
     "platform": [],
     "platform-dev": [],

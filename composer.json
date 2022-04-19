@@ -10,7 +10,7 @@
         "moebius/async-file": "Automatically and transparently makes blocking file system operations non-blocking"
     },
     "require-dev": {
-        "charm/testing": "dev-master"
+        "charm/testing": ">=0"
     },
     "license": "MIT",
     "autoload": {
@@ -26,7 +26,8 @@
             "email": "frode@ennerd.com"
         }
     ],
-    "minimum-stability": "beta",
+    "minimum-stability": "RC",
+    "prefer-stable": true,
     "scripts": {
         "test": [
             "vendor/bin/charm-testing"

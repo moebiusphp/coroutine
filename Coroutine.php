@@ -240,7 +240,7 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
                 }
                 $readableStreams = [ $resource ];
                 $void = [];
-                $count = stream_select($readableStreams, $void, $void, 0, $sleepTime);
+                $count = self::streamSelect($readableStreams, $void, $void, 0, $sleepTime);
             } while ($count === 0 && $valid);
             return $valid;
         }
@@ -298,7 +298,7 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
                 }
                 $writableStreams = [ $resource ];
                 $void = [];
-                $count = stream_select($void, $writableStreams, $void, 0, $sleepTime);
+                $count = self::streamSelect($void, $writableStreams, $void, 0, $sleepTime);
             } while ($count === 0 && $valid);
             return $valid;
         }
@@ -419,14 +419,17 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
         }
 
         /**
-         * We'll use stream_select() to wait if we have streams we need to poll.
+         * We'll use streamSelect() to wait if we have streams we need to poll.
          */
         if (count(self::$readableStreams) > 0 || count(self::$writableStreams) > 0) {
             $readableStreams = self::$readableStreams;
             $writableStreams = self::$writableStreams;
             $void = [];
-            $count = stream_select($readableStreams, $writableStreams, $void, 0, $remainingTime);
-            if ($count > 0) {
+            $count = self::streamSelect($readableStreams, $writableStreams, $void, 0, $remainingTime);
+            if (!is_int($count)) {
+                die("error");
+
+            } elseif ($count > 0) {
                 foreach (self::$readableStreams as $id => $stream) {
                     if (in_array($stream, $readableStreams)) {
                         unset(self::$readableStreams[$id]);
@@ -618,6 +621,28 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
             fwrite(STDERR, "coroutine stats: total-time=".($this->totalTimeNS/1000000000)."\n");
         }
     }
+
+    private static function streamSelect(array &$readableStreams, array &$writableStreams, array &$exceptStreams, int $seconds, int $useconds): int {
+
+        $errorCode = null;
+        $errorMessage = null;
+        set_error_handler(function(int $code, string $message, string $file, int $line) use (&$errorCode, &$errorMessage) {
+echo "\$errorMessage $file $line\n";
+            $errorCode = $code;
+            $errorMessage = $message;
+        });
+
+        $streams = [ $readableStreams, $writableStreams, $exceptStreams ];
+        $count = stream_select($readableStreams, $writableStreams, $void, $seconds, $useconds);
+        restore_error_handler();
+
+        if ($errorCode !== null) {
+            throw new \ErrorException($errorMessage, $errorCode);
+        }
+
+        return $count;
+    }
+
 
     /**
      * Helper function for debugging memory leaks and whatnot.

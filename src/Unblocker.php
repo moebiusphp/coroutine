@@ -23,12 +23,14 @@ class Unblocker {
     protected static $resources = [];
     protected static $results = [];
 
+    private static int $lastSuspend = 0;
+
     /**
      * Check if the provided resource is an unblocked proxy stream, or if
      * it is a raw stream resource.
      */
     public static function isUnblocked($resource): bool {
-        self::_interrupt();
+        self::interrupt();
         if (!is_resource($resource)) {
             throw new \InvalidArgumentException("Expected a stream resource, got ".get_debug_type($resource));
         }
@@ -37,8 +39,7 @@ class Unblocker {
     }
 
     public static function unblock($resource): mixed {
-        self::_interrupt();
-
+        self::interrupt();
         if (!is_resource($resource)) {
             return $resource;
         }
@@ -67,7 +68,6 @@ class Unblocker {
     }
 
     public function stream_open(string $path, string $mode, int $options, ?string &$opened_path): bool {
-        self::_interrupt();
         $this->id = intval(substr($path, 20));
         if (!isset(self::$resources[$this->id])) {
             return false;
@@ -77,6 +77,7 @@ class Unblocker {
         $this->mode = $mode;
         $this->options = $options;
         stream_set_blocking($this->fp, false);
+        self::suspend();
         return true;
     }
 
@@ -84,47 +85,44 @@ class Unblocker {
         fclose($this->fp);
         unset(self::$resources[$this->id]);
         unset(self::$results[$this->id]);
-        self::_interrupt();
+        self::suspend();
     }
 
     public function stream_eof(): bool {
-        self::_interrupt();
+        self::singleSuspend();
         return feof($this->fp);
     }
 
     public function stream_flush(): bool {
-        self::_interrupt();
+        self::singleSuspend();
         return fflush($this->fp);
     }
 
     public function stream_lock(int $operation): bool {
-        if ($this->pretendNonBlocking) {
-            Co::suspend();
-            return flock($this->fp, $operation | LOCK_NB);
-        }
-        while (!flock($this->fp, $operation | LOCK_NB, $would_block)) {
-            if (!$would_block) {
-                // if the function would not block, we'll not block either
-                self::_interrupt();
+        $blocking = !($operation & LOCK_NB);
+        while (is_resource($this->fp) && !flock($this->fp, $operation | LOCK_NB, $wouldBlock)) {
+            if (!$blocking || !$wouldBlock) {
+                self::suspend();
                 return false;
             }
-            Co::suspend();
+            self::suspend();
+        }
+        self::singleSuspend();
+        if (!is_resource($this->fp)) {
+            trigger_error("Stream resource is invalid", E_USER_ERROR);
+            return false;
         }
         return true;
     }
 
-    public function stream_metadata(string $path, int $option, mixed $value): bool {
-        throw new \Exception("stream_metadata not implemented");
-    }
-
     public function stream_read(int $count): string|false {
         if ($this->pretendNonBlocking) {
-            if (!Co::readable($this->fp, 0)) {
+            if (!self::readable($this->fp, 0)) {
                 return '';
             }
             return fread($this->fp, $count);
         }
-        if (!Co::readable($this->fp, $this->readTimeout)) {
+        if (!self::readable($this->fp, $this->readTimeout)) {
             // timed out
             return false;
         }
@@ -132,12 +130,12 @@ class Unblocker {
     }
 
     public function stream_seek(int $offset, int $whence = SEEK_SET): bool {
-        self::_interrupt();
+        self::singleSuspend();
         return fseek($this->fp, $whence);
     }
 
     public function stream_set_option(int $option, int $arg1=null, int $arg2=null): bool {
-        self::_interrupt();
+        self::singleSuspend();
         switch ($option) {
             case STREAM_OPTION_BLOCKING:
                 // The method was called in response to stream_set_blocking()
@@ -147,7 +145,6 @@ class Unblocker {
             case STREAM_OPTION_READ_TIMEOUT:
                 // The method was called in response to stream_set_timeout()
                 $this->readTimeout = $arg1 + ($arg2 / 1000000);
-
                 return true;
 
             case STREAM_OPTION_WRITE_BUFFER:
@@ -164,46 +161,71 @@ class Unblocker {
                 return false;
 
             default :
-                echo "stream_set_option: unsupported option $option $arg1 $arg2\n";
+                trigger_error("Unknown stream option $option with arguments ".json_encode($arg1)." and ".json_encode($arg2), E_USER_ERROR);
                 return false;
         }
         return false;
     }
 
     public function stream_stat(): array|false {
-        self::_interrupt();
+        self::singleSuspend();
         return fstat($this->fp);
     }
 
     public function stream_tell(): int {
-        self::_interrupt();
+        self::singleSuspend();
         return ftell($this->fp);
     }
 
     public function stream_truncate(int $new_size): bool {
-        self::_interrupt();
+        self::singleSuspend();
         return ftruncate($this->fp, $new_size);
     }
 
     public function stream_write(string $data): int {
         if ($this->pretendNonBlocking) {
-            if (!Co::writable($this->fp, 0)) {
+            if (!self::writable($this->fp, 0)) {
                 return 0;
             }
-            return fread($this->fp, $count);
+            return fwrite($this->fp, $count);
         }
-        if (!Co::writable($this->fp, $this->readTimeout)) {
+        if (!self::writable($this->fp, $this->readTimeout)) {
             // timed out
             return 0;
         }
         return fwrite($this->fp, $data);
     }
 
-    protected static function _interrupt(): void {
+    protected static function interrupt(): void {
         static $counter = 0;
         if (20 === $counter++) {
             $counter = 0;
             Co::interrupt();
         }
+    }
+
+    protected static function suspend(): void {
+        self::$lastSuspend = Co::getTickCount();
+        Co::suspend();
+    }
+
+    protected static function readable(mixed $stream, float $timeout=null): bool {
+        self::$lastSuspend = Co::getTickCount();
+        return Co::readable($stream, $timeout);
+    }
+
+    protected static function writable(mixed $stream, float $timeout=null): bool {
+        self::$lastSuspend = Co::getTickCount();
+        return Co::writable($stream, $timeout);
+    }
+
+    /**
+     * Avoid suspending twice within the time span of 1 millisecond
+     */
+    protected static function singleSuspend(): void {
+        if (self::$lastSuspend === Co::getTickCount() - 1) {
+            return;
+        }
+        self::suspend();
     }
 }

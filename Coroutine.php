@@ -26,6 +26,18 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      */
     const BOOTSTRAP_EVENT = self::class.'::BOOTSTRAP_EVENT';
 
+    /**
+     * A synchronized time stamp which can be used to coordinate coroutines.
+     * Holds the number of seconds with microsecond precision since Coroutine
+     * started running.
+     */
+    private static float $currentTime = 0;
+
+    /**
+     * Tracks the start time for the loop
+     */
+    private static int $hrStartTime = 0;
+
     private static bool $debug = false;
 
     /**
@@ -116,6 +128,19 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      */
     private static int $instanceCount = 0;
 
+    /**
+     * Get the current tick time.
+     */
+    public static function getTime(): float {
+        if (self::$currentTime === 0) {
+            self::bootstrap();
+        }
+        return self::$currentTime;
+    }
+
+    public static function getTickCount(): int {
+        return self::$tickCount;
+    }
 
     /**
      * Run a coroutine and await its result.
@@ -128,7 +153,9 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      * Create and run a coroutine
      */
     public static function go(Closure $coroutine, mixed ...$args): Coroutine {
-        return new self($coroutine, $args);
+        $co = new self($coroutine, $args);
+        self::suspend();
+        return $co;
     }
 
     /**
@@ -139,7 +166,7 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      */
     public static function await(object $thenable) {
         if (!($thenable instanceof self) && !Promise::isThenable($thenable)) {
-            throw new CoroutineExpectedException("Coroutine::await() expects a coroutine or a promise-like object");
+            throw new CoroutineExpectedException("Coroutine::await() expects a coroutine or a promise-like object, ".get_debug_type($thenable)." received");
         }
 
         $promiseStatus = null;
@@ -369,6 +396,8 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
             throw new LogicException("Can't run Coroutine::tick() from within a Fiber. This is a bug.");
         }
 
+        self::$currentTime = (hrtime(true) - self::$hrStartTime) / 1000000000;
+
         /**
          * Activate coroutines based on timer.
          */
@@ -505,6 +534,9 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
         if (getenv('DEBUG')) {
             self::$debug = true;
         }
+        // enables us to use hrtime
+        self::$hrStartTime = hrtime(true);
+
         $bootstrapped = true;
         self::$timers = new SplMinHeap();
         register_shutdown_function(self::finish(...));

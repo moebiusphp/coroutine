@@ -1,4 +1,4 @@
-1 (first synchronous output)
-2 (because of blocking fread)
+1 (because of blocking fread)
+2 (first synchronous output)
 3 (after blocking read)
 4 (blocking read should be done)

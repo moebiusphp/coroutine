@@ -4,6 +4,7 @@ namespace Moebius\Coroutine;
 class Exception extends \Exception {}
 
 class LogicException extends \LogicException {}
+class InternalLogicException extends LogicException {}
 class IncorrectUsageException extends LogicException {}
 class UnknownFiberException extends LogicException {}
 

@@ -9,7 +9,9 @@ use Moebius\Coroutine\{
     Exception,
     LogicException,
     RuntimeException,
-    CoroutineExpectedException
+    InternalLogicException,
+    CoroutineExpectedException,
+    UnknownFiberException
 };
 use Fiber, SplMinHeap, Closure;
 
@@ -54,6 +56,12 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      * @type array<int, Coroutine>
      */
     private static array $coroutines = [];
+
+    /**
+     * Coroutines that are waiting for the event loop to
+     * terminate.
+     */
+    private static array $zombies = [];
 
     /**
      * Coroutines that are pending an event
@@ -371,13 +379,54 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      * coroutine, run one tick of coroutines.
      */
     public static function suspend(): void {
-        if (!self::$current) {
+        if (Fiber::getCurrent() === null) {
             self::tick(false);
-        } elseif (self::$current->fiber === Fiber::getCurrent()) {
+        } elseif (self::getCurrent()) {
             Fiber::suspend();
         } else {
             throw new UnknownFiberException("Call to Coroutine::suspend() from an unknown Fiber");
         }
+    }
+
+    /**
+     * Run coroutines until there is nothing left to do or until {@see Coroutine::stop()}
+     * is called.
+     */
+    public static function drain(): void {
+        if ($self = self::getCurrent()) {
+            // A coroutine wants to wait until the event loop is finished, so
+            // we'll make a zombie out of it.
+            unset(self::$coroutines[$self->id]);
+            self::$zombies[$self->id] = $self;
+            Fiber::suspend();
+            return;
+        } else {
+            assert(!self::$running, "Drain called during event loop. Indicates bug in Moebius\Coroutine");
+            // run coroutines until there are no more work to do
+            // when there are no more work, if there are zombies
+            // we'll raise the dead and continue draining.
+            self::$running = true;
+            while (self::$running) {
+                $activity = self::tick();
+                if ($activity === 0) {
+                    if (count(self::$zombies) > 0) {
+                        self::$coroutines = self::$zombies;
+                        self::$zombies = [];
+                    } else {
+                        self::$running = false;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    public function stop(): void {
+        if (!self::$running) {
+            // already stopped
+            return;
+        }
+        self::$running = false;
     }
 
     /**
@@ -393,7 +442,7 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
             self::dumpStats(false);
         }
         if (Fiber::getCurrent()) {
-            throw new LogicException("Can't run Coroutine::tick() from within a Fiber. This is a bug.");
+            throw new InternalLogicException("Can't run Coroutine::tick() from within a Fiber. This is a bug.");
         }
 
         self::$currentTime = (hrtime(true) - self::$hrStartTime) / 1000000000;
@@ -458,10 +507,14 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
             $readableStreams = self::$readableStreams;
             $writableStreams = self::$writableStreams;
             $void = [];
+            $retries = 10;
+            repeat:
             $count = self::streamSelect($readableStreams, $writableStreams, $void, 0, $remainingTime);
             if (!is_int($count)) {
-                die("error");
-
+                if ($retries-- > 0) {
+                    // This may be a result of a posix signal, so we'll retry
+                    goto repeat;
+                }
             } elseif ($count > 0) {
                 foreach (self::$readableStreams as $id => $stream) {
                     if (in_array($stream, $readableStreams)) {
@@ -491,11 +544,14 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
      * Run all coroutines until there are no more coroutines to run.
      */
     private static function finish(): void {
+
         if (self::$running) {
             throw new LogicException("Coroutines are already running");
         }
+
         if (self::$current) {
-            // die or a fatal exception inside a coroutine
+            // This happens whenever a die() or exit() or a fatal error
+            // occurred inside a coroutine.
             self::$current = null;
             self::$coroutines = [];
             self::$frozen = [];
@@ -504,9 +560,9 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
             self::$timers = new SplMinHeap();
             return;
         }
-        self::$running = true;
-        while (self::$running && self::tick() > 0);
-        self::$running = false;
+
+        self::drain();
+        return;
     }
 
     /**
@@ -664,11 +720,9 @@ class Coroutine extends Promise implements StaticEventEmitterInterface {
         $errorCode = null;
         $errorMessage = null;
         set_error_handler(function(int $code, string $message, string $file, int $line) use (&$errorCode, &$errorMessage) {
-echo "\$errorMessage $file $line\n";
             $errorCode = $code;
             $errorMessage = $message;
         });
-
         $streams = [ $readableStreams, $writableStreams, $exceptStreams ];
         $count = stream_select($readableStreams, $writableStreams, $void, $seconds, $useconds);
         restore_error_handler();

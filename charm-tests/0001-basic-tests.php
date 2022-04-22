@@ -44,6 +44,9 @@ $d = go(function() {
 });
 
 echo "Waiting for A: ".await($a)."\n";
+
 echo "Waiting for B: ".await($b)."\n";
+
 echo "Waiting for C: ".await($c)."\n";
+
 echo "Waiting for D: ".await($d)."\n";

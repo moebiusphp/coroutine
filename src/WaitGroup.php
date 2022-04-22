@@ -8,7 +8,6 @@ final class WaitGroup extends Kernel {
 
     public function add(int $delta): void {
         $this->value += $delta;
-echo "add->value=".$this->value."\n";
         if ($this->value <= 0) {
             $this->value = 0;
             $this->release();
@@ -17,7 +16,6 @@ echo "add->value=".$this->value."\n";
 
     public function done(): void {
         $this->value--;
-echo "done->value=".$this->value."\n";
         if ($this->value <= 0) {
             $this->value = 0;
             $this->release();
@@ -34,7 +32,7 @@ echo "done->value=".$this->value."\n";
         } else {
             while ($this->value > 0) {
                 if (self::tick() === 0) {
-                    throw new \Exception("Can't wait for this wait group when no coroutines are active");
+                    throw new LogicException("Can't wait for this wait group when no coroutines are active");
                 }
             }
         }
@@ -46,10 +44,4 @@ echo "done->value=".$this->value."\n";
         }
         $this->waiting = [];
     }
-
-    /**
-     * Implementation detail. Ignore for now.
-     */
-    protected function step(): void {}
-
 }

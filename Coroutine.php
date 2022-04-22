@@ -21,39 +21,34 @@ use Moebius\Promise\{
 use Fiber, SplMinHeap, Closure;
 
 /**
- * A coroutine.
+ * A Coroutine API for PHP, managing fibers efficiently and transparently.
  */
 final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmitterInterface {
     use StaticEventEmitterTrait;
     use PromiseTrait;
 
     /**
-     * Get the current tick time.
-     */
-    public static function getTime(): float {
-        if (self::$currentTime === 0) {
-            self::bootstrap();
-        }
-        return self::$currentTime;
-    }
-
-    public static function getTickCount(): int {
-        return self::$tickCount;
-    }
-
-    /**
-     * Run a coroutine and await its result.
+     * Run a coroutine and wait for it to return or throw an exception.
+     *
+     * @param Closure $coroutine    The function to run
+     * @param mixed ...$args        Arguments to pass to the function
+     * @return mixed                The value returned from the coroutine
+     * @throws \Throwable           Any exception thrown by the coroutine
      */
     public static function run(Closure $coroutine, mixed ...$args): mixed {
         return self::await(self::go($coroutine, ...$args));
     }
 
     /**
-     * Create and run a coroutine
+     * Run a coroutine in parallel. Returns a Coroutine object.
+     *
+     * @param Closure $coroutine    The function to run
+     * @param mixed ...$args        Arguments to pass to the function
+     * @return Coroutine            A coroutine
      */
     public static function go(Closure $coroutine, mixed ...$args): Coroutine {
         $co = new self($coroutine, $args);
-        self::suspend();
+        Kernel::suspend();
         return $co;
     }
 
@@ -61,57 +56,13 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      * Await a return value from a coroutine or a promise, while allowing
      * other coroutines to perform some work.
      *
-     * @param object $thenable A coroutine or promise-like object.
+     * @param object $thenable      A coroutine or a promise
+     * @param mixed ...$args        Arguments to pass to the function
+     * @return Coroutine            The value returned from the coroutine
+     * @throws \Throwable           Any exception thrown by the coroutine
      */
     public static function await(object $thenable) {
-        if (!($thenable instanceof self) && !Promise::isThenable($thenable)) {
-            throw new CoroutineExpectedException("Coroutine::await() expects a coroutine or a promise-like object, ".get_debug_type($thenable)." received");
-        }
-
-        $promiseStatus = null;
-        $promiseResult = null;
-
-        $thenable->then(function($result) use (&$promiseStatus, &$promiseResult) {
-            if ($promiseStatus !== null) {
-                throw new PromiseResolvedException("Promise is already resolved");
-            }
-            $promiseStatus = true;
-            $promiseResult = $result;
-        }, function($reason) use (&$promiseStatus, &$promiseResult) {
-            if ($promiseStatus !== null) {
-                throw new PromiseResolvedException("Promise is already resolved");
-            }
-            $promiseStatus = false;
-            $promiseResult = $reason;
-        });
-
-        if (!self::$current) {
-            // Not inside a coroutine
-            while ($promiseStatus === null && self::tick(false) > 0);
-        } elseif (self::$current->fiber === Fiber::getCurrent()) {
-            // Inside a coroutine, so remove it from the loop
-            $co = self::$current;
-            unset(self::$coroutines[self::$current->id]);
-            $thenable->then(function($result) use ($co, &$promiseStatus, &$promiseResult) {
-                self::$coroutines[$co->id] = $co;
-            }, function($reason) use ($co, &$promiseStatus, &$promiseResult) {
-                self::$coroutines[$co->id] = $co;
-            });
-            Fiber::suspend();
-        } else {
-            throw new UnknownFiberException("Can't use Coroutine::await() from inside an unknown Fiber");
-        }
-
-        if ($promiseStatus === true) {
-            return $promiseResult;
-        } elseif ($promiseStatus === false) {
-            if (!($promiseResult instanceof \Throwable)) {
-                throw new RejectedException($promiseResult);
-            }
-            throw $promiseResult;
-        } else {
-            throw new LogicException("Promise did not resolve");
-        }
+        return self::$modules['core.promises']->awaitThenable($thenable);
     }
 
     /**
@@ -123,54 +74,7 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      * @return bool                 false if the stream is not readable (timed out or closed)
      */
     public static function readable(mixed $resource, float $timeout=null): bool {
-        self::bootstrap();
-        if ($timeout !== null) {
-            $timeout = hrtime(true) + (1000000000 * $timeout) | 0;
-        }
-
-        if ($co = self::getCurrent()) {
-            $valid = true;
-            if ($timeout !== null) {
-                self::$timers->insert([$timeout, function() use ($co, &$valid) {
-                    if (!$valid) {
-                        return;
-                    }
-                    $valid = false;
-                    self::$coroutines[$co->id] = $co;
-                    unset(self::$frozen[$co->id]);
-                    unset(self::$readableStreams[$co->id]);
-                }]);
-            };
-            self::$readableStreams[$co->id] = $resource;
-            self::$frozen[$co->id] = $co;
-            unset(self::$coroutines[$co->id]);
-            Fiber::suspend();
-            if ($valid && !is_resource($resource)) {
-                return false;
-            }
-            return $valid;
-        } else {
-            $valid = true;
-            if ($timeout !== null) {
-                self::$timers->insert([$timeout, function() use (&$valid) {
-                    $valid = false;
-                }]);
-            }
-            do {
-                if (self::tick(false) > 0) {
-                    $sleepTime = 0;
-                } else {
-                    $sleepTime = 50000;
-                }
-                if (!is_resource($resource)) {
-                    return false;
-                }
-                $readableStreams = [ $resource ];
-                $void = [];
-                $count = self::streamSelect($readableStreams, $void, $void, 0, $sleepTime);
-            } while ($count === 0 && $valid);
-            return $valid;
-        }
+        return parent::readable($resource, $timeout);
     }
 
     /**
@@ -182,54 +86,7 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      * @return bool                 false if the stream is no readable (timed out)
      */
     public static function writable(mixed $resource, float $timeout=null): bool {
-        self::bootstrap();
-        if ($timeout !== null) {
-            $timeout = hrtime(true) + (1000000000 * $timeout) | 0;
-        }
-
-        if ($co = self::getCurrent()) {
-            $valid = true;
-            if ($timeout !== null) {
-                self::$timers->insert([$timeout, function() use ($co, &$valid) {
-                    if (!$valid) {
-                        return;
-                    }
-                    $valid = false;
-                    self::$coroutines[$co->id] = $co;
-                    unset(self::$frozen[$co->id]);
-                    unset(self::$writableStreams[$co->id]);
-                }]);
-            };
-            self::$writableStreams[$co->id] = $resource;
-            self::$frozen[$co->id] = $co;
-            unset(self::$coroutines[$co->id]);
-            Fiber::suspend();
-            if ($valid && !is_resource($resource)) {
-                return false;
-            }
-            return $valid;
-        } else {
-            $valid = true;
-            if ($timeout !== null) {
-                self::$timers->insert([$timeout, function() use (&$valid) {
-                    $valid = false;
-                }]);
-            }
-            do {
-                if (self::tick(false) > 0) {
-                    $sleepTime = 0;
-                } else {
-                    $sleepTime = 50000;
-                }
-                if (!is_resource($resource)) {
-                    return false;
-                }
-                $writableStreams = [ $resource ];
-                $void = [];
-                $count = self::streamSelect($void, $writableStreams, $void, 0, $sleepTime);
-            } while ($count === 0 && $valid);
-            return $valid;
-        }
+        return parent::writable($resource, $timeout);
     }
 
     /**
@@ -239,29 +96,18 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      * @param float $seconds Number of seconds to sleep
      */
     public static function sleep(float $seconds): void {
-        self::bootstrap();
-        $expires = hrtime(true) + ($seconds * 1000000000) | 0;
-        if ($co = self::getCurrent()) {
-            self::$timers->insert([$expires, $co->id]);
-            self::$frozen[$co->id] = $co;
-            unset(self::$coroutines[$co->id]);
-            Fiber::suspend();
-        } else {
-            while (hrtime(true) < $expires) {
-                self::tick();
-            }
-        }
+        parent::sleep($seconds);
     }
 
     /**
      * Provide an opportunity for the current coroutine to be suspended. The coroutine
      * will only be suspended if the interrupt time slice has been exceeded.
      *
-     * @see self::suspend()
+     * @see Kernel::suspend()
      */
     public static function interrupt(): void {
-        if (self::$current && (hrtime(true) - self::$current->startTimeNS) > self::$interruptTimeNS) {
-            self::suspend();
+        if (Kernel::$current && (hrtime(true) - Kernel::$current->startTimeNS) > self::$interruptTimeNS) {
+            Kernel::suspend();
         }
     }
 
@@ -270,47 +116,30 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      * coroutine, run one tick of coroutines.
      */
     public static function suspend(): void {
-        if (Fiber::getCurrent() === null) {
-            self::tick(false);
-        } elseif (self::getCurrent()) {
-            Fiber::suspend();
-        } else {
-            throw new UnknownFiberException("Call to Coroutine::suspend() from an unknown Fiber");
-        }
+        Kernel::suspend();
     }
 
     /**
      * Advanced usage.
      *
-     * Run coroutines until there is nothing left to do or until {@see Coroutine::stopDraining()}
+     * Run coroutines until there is nothing left to do or until {@see Coroutine::stop()}
      * is called.
      */
     public static function drain(): void {
-        if ($self = self::getCurrent()) {
+        if ($self = Kernel::getCurrent()) {
             // A coroutine wants to wait until the event loop is finished, so
             // we'll make a zombie out of it.
             unset(self::$coroutines[$self->id]);
             self::$zombies[$self->id] = $self;
             Fiber::suspend();
-            return;
         } else {
             assert(!self::$running, "Drain called during event loop. Indicates bug in Moebius\Coroutine");
             // run coroutines until there are no more work to do
             // when there are no more work, if there are zombies
             // we'll raise the dead and continue draining.
-            self::$running = true;
-            while (self::$running) {
-                $activity = self::tick();
-                if ($activity === 0) {
-                    if (count(self::$zombies) > 0) {
-                        self::$coroutines = self::$zombies;
-                        self::$zombies = [];
-                    } else {
-                        self::$running = false;
-                        break;
-                    }
-                }
-            }
+            self::runLoop(function() {
+                return true;
+            });
         }
     }
 
@@ -320,19 +149,13 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      * Stop draining the event loop. This essentially causes all calls to the {@see self::drain()} to
      * finish, but it will not actually terminate all coroutines.
      */
-    public function stopDraining(): void {
+    public function stop(): void {
         if (!self::$running) {
             // already stopped
             return;
         }
         self::$running = false;
     }
-
-    /**
-     * Every fiber instance receives a unique ID number which is used
-     * to schedule timers and track IO events.
-     */
-    private int $id;
 
     /**
      * Holds the function arguments until the coroutine starts.
@@ -389,7 +212,7 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
     /**
      * Run the coroutine for one iteration.
      */
-    protected function step(): void {
+    protected function stepSignal(): void {
         try {
             $this->startTimeNS = hrtime(true);
             if ($this->fiber->isSuspended()) {
@@ -437,15 +260,6 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
             self::dumpStats();
             fwrite(STDERR, "coroutine stats: total-time=".($this->totalTimeNS/1000000000)."\n");
         }
-    }
-
-    /**
-     * Helper function for debugging memory leaks and whatnot.
-     *
-     * @internal
-     */
-    protected static function dumpStats(bool $nl=true): void {
-        fwrite(STDERR, "global stats: instances=".self::$instanceCount." active=".count(self::$coroutines)." rs=".count(self::$readableStreams)." ws=".count(self::$readableStreams)." frozen=".count(self::$frozen).($nl ? "\n" : "\r"));
     }
 
 }

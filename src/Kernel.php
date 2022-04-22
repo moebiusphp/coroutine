@@ -313,4 +313,26 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
         self::events()->emit(self::BOOTSTRAP_EVENT, (object) [], false);
     }
 
+    /**
+     * Perform stream select on these streams. This function is an entrypoint for implementing
+     * support for a larger number of streams.
+     */
+    protected static function streamSelect(array &$readableStreams, array &$writableStreams, array &$exceptStreams, int $seconds, int $useconds): int {
+
+        $errorCode = null;
+        $errorMessage = null;
+        set_error_handler(function(int $code, string $message, string $file, int $line) use (&$errorCode, &$errorMessage) {
+            $errorCode = $code;
+            $errorMessage = $message;
+        });
+        $streams = [ $readableStreams, $writableStreams, $exceptStreams ];
+        $count = stream_select($readableStreams, $writableStreams, $void, $seconds, $useconds);
+        restore_error_handler();
+
+        if ($errorCode !== null) {
+            throw new \ErrorException($errorMessage, $errorCode);
+        }
+
+        return $count;
+    }
 }

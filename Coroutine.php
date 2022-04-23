@@ -57,11 +57,10 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      * other coroutines to perform some work.
      *
      * @param object $thenable      A coroutine or a promise
-     * @param mixed ...$args        Arguments to pass to the function
-     * @return Coroutine            The value returned from the coroutine
+     * @return mixed                The value returned from the coroutine
      * @throws \Throwable           Any exception thrown by the coroutine
      */
-    public static function await(object $thenable) {
+    public static function await(object $thenable): mixed {
         return self::$modules['core.promises']->awaitThenable($thenable);
     }
 
@@ -126,22 +125,17 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      * is called.
      */
     public static function drain(): void {
-        if ($self = Kernel::getCurrent()) {
-            // A coroutine wants to wait until the event loop is finished, so
-            // we'll make a zombie out of it.
-            unset(self::$coroutines[$self->id]);
-            self::$zombies[$self->id] = $self;
-            Fiber::suspend();
+        if ($co = self::getCurrent()) {
+            unset(self::$coroutines[$co->id]);
+            self::$zombies[] = $co;
+            self::suspend();
         } else {
-            assert(!self::$running, "Drain called during event loop. Indicates bug in Moebius\Coroutine");
-            // run coroutines until there are no more work to do
-            // when there are no more work, if there are zombies
-            // we'll raise the dead and continue draining.
             self::runLoop(function() {
                 return true;
             });
         }
     }
+    protected static array $drainers = [];
 
     /**
      * Advanced usage.
@@ -197,10 +191,13 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      */
     private int $stepCount = 0;
 
+    public readonly string $name;
+
     /**
      * Create a new coroutine instance and add it to the coroutine loop
      */
     private function __construct(Closure $coroutine, array $args) {
+        $this->name = self::describeFunction($coroutine);
         self::bootstrap();
         self::$instanceCount++;
         $this->id = self::$nextId++;

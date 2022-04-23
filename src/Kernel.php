@@ -206,69 +206,6 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
     protected static array $hookAfterTick = [];
 
     /**
-     * Await a return value from a coroutine or a promise, while allowing
-     * other coroutines to perform some work.
-     *
-     * @param object $thenable      A coroutine or a promise
-     * @param mixed ...$args        Arguments to pass to the function
-     * @return Coroutine            The value returned from the coroutine
-     * @throws \Throwable           Any exception thrown by the coroutine
-     */
-    protected static function await(object $thenable) {
-die("Kernel::await deprecated");
-        if (!($thenable instanceof self) && !Promise::isThenable($thenable)) {
-            throw new CoroutineExpectedException("Coroutine::await() expects a coroutine or a promise-like object, ".get_debug_type($thenable)." received");
-        }
-
-        $promiseStatus = null;
-        $promiseResult = null;
-
-        $thenable->then(function($result) use (&$promiseStatus, &$promiseResult) {
-            if ($promiseStatus !== null) {
-                throw new PromiseResolvedException("Promise is already resolved");
-            }
-            $promiseStatus = true;
-            $promiseResult = $result;
-        }, function($reason) use (&$promiseStatus, &$promiseResult) {
-            if ($promiseStatus !== null) {
-                throw new PromiseResolvedException("Promise is already resolved");
-            }
-            $promiseStatus = false;
-            $promiseResult = $reason;
-        });
-
-        if (!self::$current) {
-            // Not inside a coroutine
-            self::runLoop(function() use (&$coroutineStatus) {
-                return $coroutineStatus === null;
-            });
-        } elseif (self::$current->fiber === Fiber::getCurrent()) {
-            // Inside a coroutine, so remove it from the loop
-            $co = self::$current;
-            unset(self::$coroutines[self::$current->id]);
-            $thenable->then(function($result) use ($co, &$promiseStatus, &$promiseResult) {
-                self::$coroutines[$co->id] = $co;
-            }, function($reason) use ($co, &$promiseStatus, &$promiseResult) {
-                self::$coroutines[$co->id] = $co;
-            });
-            Fiber::suspend();
-        } else {
-            throw new UnknownFiberException("Can't use Coroutine::await() from inside an unknown Fiber");
-        }
-
-        if ($promiseStatus === true) {
-            return $promiseResult;
-        } elseif ($promiseStatus === false) {
-            if (!($promiseResult instanceof \Throwable)) {
-                throw new RejectedException($promiseResult);
-            }
-            throw $promiseResult;
-        } else {
-            throw new LogicException("Promise did not resolve");
-        }
-    }
-
-    /**
      * Suspend the current coroutine until reading from a stream resource will
      * not block.
      *
@@ -281,7 +218,7 @@ die("Kernel::await deprecated");
         if ($co = self::getCurrent()) {
             $valid = true;
             if ($timeout !== null) {
-                self::schedule($timeout, function() use ($co, &$valid) {
+                self::$modules['core.timers']->scheduleCallback(function() use ($co, &$valid) {
                     if (!$valid) {
                         return;
                     }
@@ -289,7 +226,7 @@ die("Kernel::await deprecated");
                     self::$coroutines[$co->id] = $co;
                     unset(self::$frozen[$co->id]);
                     unset(self::$readableStreams[$co->id]);
-                });
+                }, $timeout);
             };
             self::$readableStreams[$co->id] = $resource;
             self::$frozen[$co->id] = $co;
@@ -302,9 +239,9 @@ die("Kernel::await deprecated");
         } else {
             $valid = true;
             if ($timeout !== null) {
-                self::schedule($timeout, function() use (&$valid) {
+                self::$modules['core.timers']->scheduleCallback(function() use (&$valid) {
                     $valid = false;
-                });
+                }, $timeout);
             }
             $readableStreams = [ $resource ];
             $void = [];
@@ -332,7 +269,7 @@ die("Kernel::await deprecated");
         if ($co = self::getCurrent()) {
             $valid = true;
             if ($timeout !== null) {
-                self::schedule($timeout, function() use ($co, &$valid) {
+                self::$modules['core.timers']->scheduleCallback($timeout, function() use ($co, &$valid) {
                     if (!$valid) {
                         return;
                     }
@@ -353,12 +290,13 @@ die("Kernel::await deprecated");
         } else {
             $valid = true;
             if ($timeout !== null) {
-                self::schedule($timeout, function() use (&$valid) {
+                self::$modules['core.timers']->scheduleCallback($timeout, function() use (&$valid) {
                     $valid = false;
                 });
             }
             $writableStreams = [ $resource ];
             $void = [];
+            
             self::runLoop(function() use ($writableStreams, $void, &$valid) {
                 if (!$valid || !is_resource($writableStreams[0])) {
                     return false;
@@ -408,40 +346,35 @@ die("Kernel::await deprecated");
      * @param callable $resumeFunction
      */
     protected static function runLoop(callable $resumeFunction): void {
+        if (self::getCurrent()) {
+            throw new InternalLogicException("Can't call Kernel::runLoop() from within a coroutine");
+        }
         if (self::$running) {
-            if ($co = self::getCurrent()) {
-                for (;;) {
-                    if (!$resumeFunction()) {
-                        return;
-                    }
-                    if (0 === ($activity = self::getActivityLevel())) {
-                        return;
-                    }
-                    if (!self::$running) {
-                        throw new InterruptedException("Moebius\Coroutine::stop() was called");
-                    }
-                    self::suspend();
-                }
-            } else {
-                throw new InternalLogicException("Kernel::runLoop() must not be called while loop is already running, except for inside a coroutine");
+            throw new InternalLogicException("Loop is already running");
+        }
+        self::$running = true;
+        for (;;) {
+            if (!$resumeFunction()) {
+                self::$running = false;
+                return;
             }
-        } else {
-            self::$running = true;
-            for (;;) {
-                if (!$resumeFunction()) {
+
+            if (0 === ($activity = self::getActivityLevel())) {
+                if (count(self::$zombies) > 0) {
+                    foreach (self::$zombies as $co) {
+                        self::$coroutines[$co->id] = $co;
+                    }
+                    self::$zombies = [];
+                } else {
                     self::$running = false;
                     return;
                 }
-                if (0 === ($activity = self::getActivityLevel())) {
-                    self::$running = false;
-                    return;
-                }
-                if (!self::$running) {
-                    self::$running = false;
-                    throw new InterruptedException("Moebius\Coroutine::stop() aas called");
-                }
-                self::tick();
             }
+            if (!self::$running) {
+                self::$running = false;
+                throw new InterruptedException("Moebius\Coroutine::stop() was called");
+            }
+            self::tick();
         }
     }
 
@@ -572,11 +505,7 @@ die("Kernel::await deprecated");
     /**
      * Run all coroutines until there are no more coroutines to run.
      */
-    protected static function finish(): void {
-
-        if (self::$running) {
-            throw new LogicException("Coroutines are already running");
-        }
+    protected static function onScriptEnd(): void {
 
         if (self::$current) {
             // This happens whenever a die() or exit() or a fatal error
@@ -590,7 +519,9 @@ die("Kernel::await deprecated");
             return;
         }
 
-        Coroutine::drain();
+        self::runLoop(function() {
+            return true;
+        });
         return;
     }
 
@@ -632,7 +563,7 @@ die("Kernel::await deprecated");
 
         $bootstrapped = true;
         self::$timers = new SplMinHeap();
-        register_shutdown_function(self::finish(...));
+        register_shutdown_function(self::onScriptEnd(...));
         self::events()->emit(self::BOOTSTRAP_EVENT, (object) [], false);
     }
 

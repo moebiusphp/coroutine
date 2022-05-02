@@ -506,7 +506,6 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
      * Run all coroutines until there are no more coroutines to run.
      */
     protected static function onScriptEnd(): void {
-
         if (self::$current) {
             // This happens whenever a die() or exit() or a fatal error
             // occurred inside a coroutine.
@@ -516,6 +515,12 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
             self::$readableStreams = [];
             self::$writableStreams = [];
             self::$timers = new SplMinHeap();
+            return;
+        }
+
+        // Don't run if we're coming from a fatal error (uncaught exception).
+        $error = error_get_last();
+        if ((isset($error['type']) ? $error['type'] : 0) & (E_ERROR | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR | E_RECOVERABLE_ERROR)) {
             return;
         }
 

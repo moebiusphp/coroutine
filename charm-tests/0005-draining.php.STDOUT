@@ -1,7 +1,7 @@
 ......Calling drain
-.Co co calls drain
+Co co calls drain
 ....Other coroutine calls Co::drain()
-.........Drain complete
+..........Drain complete
 0
 Co co drained
 Other coroutine drained

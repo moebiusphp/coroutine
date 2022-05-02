@@ -1,0 +1,10 @@
+A1: Waiting
+A2: Waiting
+B: Sleeping 0.5
+C: Sleeping 1 sec
+Main thread waiting
+B: Done
+C: Done
+Main thread done
+A1: WaitGroup finished
+A2: WaitGroup finished

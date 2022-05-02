@@ -15,6 +15,9 @@ final class WaitGroup extends Kernel {
     }
 
     public function done(): void {
+        if ($this->value === 0) {
+            throw new LogicException("Unexpected call to WaitGroup::done(). Use WaitGroup::add(1) to increase the number of permitted calls.");
+        }
         $this->value--;
         if ($this->value <= 0) {
             $this->value = 0;

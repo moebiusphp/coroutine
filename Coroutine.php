@@ -247,7 +247,7 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
 
             if ($this->fiber->isTerminated()) {
                 unset(self::$coroutines[$this->id]);
-                $this->resolve($this->fiber->getReturn());
+                $this->fulfill($this->fiber->getReturn());
             }
         } catch (\Throwable $e) {
             unset(self::$coroutines[$this->id]);

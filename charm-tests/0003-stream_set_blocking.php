@@ -22,7 +22,7 @@ $readFP = Unblocker::unblock($readFP);
 
 // this should happen immediately
 Co::go(function() {
-    echo "2 (because of blocking fread)\n";
+    echo "1 (because of blocking fread)\n";
 });
 
 Co::go(function() {
@@ -38,7 +38,7 @@ Co::go(function() {
 
 stream_set_blocking($readFP, false);
 
-echo "1 (first synchronous output)\n";
+echo "2 (first synchronous output)\n";
 $line = fread($readFP, 4096);
 echo "3 (after blocking read)\n";
 

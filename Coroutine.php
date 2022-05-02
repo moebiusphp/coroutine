@@ -48,6 +48,14 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      */
     public static function go(Closure $coroutine, mixed ...$args): Coroutine {
         $co = new self($coroutine, $args);
+
+        $old = self::$current;
+        self::$current = $co;
+
+        $co->stepSignal();
+
+        self::$current = $old;
+
         return $co;
     }
 

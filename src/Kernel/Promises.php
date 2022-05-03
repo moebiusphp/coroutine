@@ -40,6 +40,15 @@ class Promises extends KernelModule {
 
         $co = self::getCurrent();
 
+        if (self::$debug) {
+            if ($co) {
+                $this->log("Coroutine {id} awaiting promise", ['id' => $co->id]);
+            } else {
+                $this->log("Global routine awaiting promise");
+            }
+        }
+
+
         $thenable->then(function($value) use (&$state, &$result, $co) {
             if ($state !== 0) {
                 throw new PromiseResolvedException("Promise invoked two listeners");
@@ -47,8 +56,11 @@ class Promises extends KernelModule {
             $state = 1;
             $result = $value;
             if ($co) {
+                self::$debug && $this->log("Coroutine {id} has promise fulfilled", ['id' => $co->id]);
                 --self::$moduleActivity[self::$name];
                 self::$coroutines[$co->id] = $co;
+            } else {
+                self::$debug && $this->log("Global routine has promise fulfilled");
             }
         }, function($reason) use (&$state, &$result, $co) {
             if ($state !== 0) {
@@ -57,8 +69,11 @@ class Promises extends KernelModule {
             $state = 2;
             $result = $reason;
             if ($co) {
+                self::$debug && $this->log("Coroutine {id} has promise rejected", ['id' => $co->id]);
                 --self::$moduleActivity[self::$name];
                 self::$coroutines[$co->id] = $co;
+            } else {
+                self::$debug && $this->log("Global routine {id} has promise rejected");
             }
         });
 
@@ -82,12 +97,18 @@ class Promises extends KernelModule {
         }
     }
 
+    private function log(string $message, array $vars=[]): void {
+        self::writeLog('['.self::$name.'] '.$message, $vars);
+    }
+
     public function start(): void {
+        $this->log("Start");
         self::$moduleActivity[self::$name] = 0;
         $this->active = true;
     }
 
     public function stop(): void {
+        $this->log("Stop");
         unset(self::$moduleActivity[self::$name]);
         $this->active = false;
     }

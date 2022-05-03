@@ -38,12 +38,6 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
     }
 
     /**
-     * Every fiber instance receives a unique ID number which is used
-     * to schedule timers and track IO events.
-     */
-    protected int $id;
-
-    /**
      * A reference to the Fiber instance
      */
     protected Fiber $fiber;
@@ -88,21 +82,6 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
     protected static int $interruptTimeNS = 100000000;
 
     /**
-     * Heap with tasks sorted by the next time they should start. Each
-     * task is inserted as an array [ $nanoTime, $coroutineIdOrCallable ]
-     *
-     * @type SplMinHeap<array{0: int, 1: int|callable}>
-     */
-    private static ?SplMinHeap $timers = null;
-
-    /**
-     * Holds a reference to the currently active coroutine
-     *
-     * @type self
-     */
-    protected static ?self $current = null;
-
-    /**
      * Counts how many coroutines are currently held in memory
      *
      * @type int
@@ -126,48 +105,11 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
     protected static array $moduleActivity = [];
 
     /**
-     * Coroutines that are currently active
-     *
-     * @type array<int, Coroutine>
-     */
-    protected static array $coroutines = [];
-
-    /**
-     * Coroutines that are waiting for the event loop to
-     * terminate.
-     */
-    protected static array $zombies = [];
-
-    /**
-     * Coroutines that are pending an event
-     *
-     * @type array<int, Coroutine>
-     */
-    protected static array $frozen = [];
-
-    /**
-     * Next available coroutine ID
-     *
-     * @type int
-     */
-    protected static int $nextId = 1;
-
-    /**
      * Tick count increases by one for every tick
      *
      * @type int
      */
     protected static int $tickCount = 0;
-
-    /**
-     * Microtasks to run immediately after a fiber  suspends, before next 
-     * fiber resumes.
-     *
-     * Tasks are added by kernel extensions when needed.
-     *
-     * @type array<callable>
-     */
-    protected static array $microTasks = [];
 
     /**
      * True whenever the coroutine loop is draining. Set this to false
@@ -192,18 +134,30 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
     protected static array $writableStreams = [];
 
     /**
-     * Hook for events that must run before all coroutines begin their next
-     * iteration.
+     * Hook for events that must run before the main tick functions.
+     *
+     * @var array<string, \Closure>
      */
     protected static array $hookBeforeTick = [];
 
     /**
-     * Hook for events that must run after all coroutines have done completed
-     * their iteration.
+     * Hook for events that must run on every tick
+     *
+     * @var array<string, \Closure>
+     */
+    protected static array $hookTick = [];
+
+    /**
+     * Hook for events that must run after the main tick functions.
      *
      * @var array<string, \Closure>
      */
     protected static array $hookAfterTick = [];
+
+    /**
+     * Hook for events that run after the PHP application terminates
+     */
+    protected static array $hookAppTerminate = [];
 
     /**
      * Suspend the current coroutine until reading from a stream resource will
@@ -296,7 +250,7 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
             }
             $writableStreams = [ $resource ];
             $void = [];
-            
+
             self::runLoop(function() use ($writableStreams, $void, &$valid) {
                 if (!$valid || !is_resource($writableStreams[0])) {
                     return false;
@@ -346,6 +300,7 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
      * @param callable $resumeFunction
      */
     protected static function runLoop(callable $resumeFunction): void {
+        self::bootstrap();
         if (self::getCurrent()) {
             throw new InternalLogicException("Can't call Kernel::runLoop() from within a coroutine");
         }
@@ -359,21 +314,16 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
                 return;
             }
 
-            if (0 === ($activity = self::getActivityLevel())) {
-                if (count(self::$zombies) > 0) {
-                    foreach (self::$zombies as $co) {
-                        self::$coroutines[$co->id] = $co;
-                    }
-                    self::$zombies = [];
-                } else {
-                    self::$running = false;
-                    return;
-                }
+            if (0 === self::getActivityLevel()) {
+                self::$running = false;
+                return;
             }
+
             if (!self::$running) {
                 self::$running = false;
                 throw new InterruptedException("Moebius\Coroutine::stop() was called");
             }
+
             self::tick();
         }
     }
@@ -385,8 +335,7 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
      * @param bool $maySleep    If false, do not sleep.
      * @return int              The number of unfinished coroutines that are being managed
      */
-    protected static function tick(bool $maySleep=true): int {
-        self::bootstrap();
+    private static function tick(): int {
         if (self::$debug) {
             self::dumpStats(false);
         }
@@ -404,17 +353,28 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
         }
 
         /**
-         * Activate coroutines based on timer.
+         * @see self::$hookTick
          */
-        $now = hrtime(true);
-        while (self::$timers->count() > 0 && self::$timers->top()[0] < $now) {
-            list($time, $callback) = self::$timers->extract();
-            $callback();
+        foreach (self::$hookTick as $handler) {
+            $handler();
         }
+
+        /**
+         * @see self::$hookAfterTick
+         */
+        foreach (self::$hookAfterTick as $handler) {
+            $handler();
+        }
+
+        self::$tickCount++;
+
+        return self::getActivityLevel();
+
 
         /**
          * Run all active coroutines.
          */
+/*
         foreach (self::$coroutines as $co) {
             self::$current = $co;
             $co->stepSignal();
@@ -424,40 +384,12 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
             self::$microTasks = [];
         }
         self::$current = null;
-
-        /**
-         * @see self::$hookAfterTick
-         */
-        foreach (self::$hookAfterTick as $handler) {
-            $handler();
-        }
-
-        /**
-         * How much time can we spend waiting for IO?
-         */
-        if (!$maySleep) {
-            $remainingTime = 0;
-        } elseif (self::$coroutines === []) {
-            // if there are no busy coroutines, we can afford some sleep time
-            $now = hrtime(true);
-            $nextEvent = $now + 20000000;
-            if (self::$timers->count() > 0) {
-                $nextEvent = min($nextEvent, self::$timers->top()[0]);
-            }
-            if ($nextEvent < $now) {
-                $nextEvent = $now;
-            }
-
-            // time in microseconds
-            $remainingTime = (($nextEvent - $now) / 1000) | 0;
-        } else {
-            // busy coroutines means no sleep
-            $remainingTime = 0;
-        }
+*/
 
         /**
          * We'll use streamSelect() to wait if we have streams we need to poll.
          */
+/*
         if (count(self::$readableStreams) > 0 || count(self::$writableStreams) > 0) {
             $readableStreams = self::$readableStreams;
             $writableStreams = self::$writableStreams;
@@ -489,32 +421,28 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
         } elseif ($remainingTime > 0) {
             usleep($remainingTime);
         }
-
-        self::$tickCount++;
-
-        return self::getActivityLevel();
+*/
     }
 
     /**
      * Returns the total number of managed coroutines and callbacks
      */
     protected static function getActivityLevel(): int {
-        return array_sum(self::$moduleActivity) + count(self::$coroutines) + count(self::$readableStreams) + count(self::$writableStreams) + count(self::$timers);
+        return array_sum(self::$moduleActivity);
     }
 
     /**
      * Run all coroutines until there are no more coroutines to run.
      */
-    protected static function onScriptEnd(): void {
-        if (self::$current) {
+    protected static function onAppTerminate(): void {
+        foreach (self::$hookAppTerminate as $k => $hook) {
+            $hook();
+        }
+
+        if (self::$modules['core.coroutines']->current) {
             // This happens whenever a die() or exit() or a fatal error
             // occurred inside a coroutine.
-            self::$current = null;
-            self::$coroutines = [];
-            self::$frozen = [];
-            self::$readableStreams = [];
-            self::$writableStreams = [];
-            self::$timers = new SplMinHeap();
+            self::cleanup();
             return;
         }
 
@@ -527,6 +455,8 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
         self::runLoop(function() {
             return true;
         });
+
+        self::cleanup();
         return;
     }
 
@@ -535,13 +465,21 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
      * Fiber being executed.
      */
     protected static function getCurrent(): ?self {
-        if (self::$current === null) {
+        $current = self::$modules['core.coroutines']->current;
+        $fiber = Fiber::getCurrent();
+        if ($fiber === null && $current === null) {
             return null;
         }
-        if (self::$current->fiber !== Fiber::getCurrent()) {
-            throw new UnknownFiberException("Can't use Coroutine API to manage unknown Fiber instances");
+        if ($current && $current->fiber === $fiber) {
+            return $current;
         }
-        return self::$current;
+        if ($current === null) {
+            throw new UnknownFiberException("There is no current coroutine, but we are running inside a fiber");
+        }
+        if ($fiber === null) {
+            throw new UnknownFiberException("There is no current fiber, but a coroutine is marked as active");
+        }
+        throw new UnknownFiberException("The current fiber does not match the current coroutine");
     }
 
     /**
@@ -557,19 +495,28 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
         }
         // enables us to use hrtime
         self::$hrStartTime = hrtime(true);
+        self::$currentTime = (hrtime(true) - self::$hrStartTime) / 1000000000;
 
         foreach ( [
+            Kernel\Coroutines::class,
             Kernel\Timers::class,
-            Kernel\Promises::class
+            Kernel\Promises::class,
+            Kernel\Zombies::class,
         ] as $module) {
             self::$modules[$module::$name] = new $module();
             self::$modules[$module::$name]->start();
         }
 
         $bootstrapped = true;
-        self::$timers = new SplMinHeap();
-        register_shutdown_function(self::onScriptEnd(...));
+//        self::$timers = new SplMinHeap();
+        register_shutdown_function(self::onAppTerminate(...));
         self::events()->emit(self::BOOTSTRAP_EVENT, (object) [], false);
+    }
+
+    protected static function cleanup(): void {
+        foreach (self::$modules as $key => $instance) {
+            $instance->stop();
+        }
     }
 
     /**
@@ -594,26 +541,22 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
 
         return $count;
     }
-/*
-    protected static function scheduleCallback(float $timeout, callable $callback): void {
-        $timeout = hrtime(true) + (1000000000 * $timeout) | 0;
-        self::$timers->insert([ hrtime(true) + (1000000000 * $timeout) | 0, $callbackOrCoroutineId ]);
+
+    protected static function writeLog(string $message, array $vars=[]): void {
+        fwrite(STDERR, self::interpolateString(gmdate('Y-m-d H:i:s').' '.trim($message)."\n", $vars));
     }
 
-    protected static function scheduleCoroutine(float $timeout, int $coroutineId): void {
-        assert(isset(self::$coroutines[$coroutineId]), "Unknown coroutine id $coroutineId");
-        self::$frozen[$coroutineId] = self::$coroutines[$coroutineId];
-        unset(self::$coroutines[$coroutineId]);
-        self::$timers->insert([ hrtime(true) + (1000000000 * $timeout) | 0, $coroutineId ]);
-    }
-*/
     /**
      * Helper function for debugging memory leaks and whatnot.
      *
      * @internal
      */
     protected static function dumpStats(bool $nl=true): void {
-        fwrite(STDERR, "global stats: instances=".self::$instanceCount." active=".count(self::$coroutines)." timers=".count(self::$timers)." rs=".count(self::$readableStreams)." ws=".count(self::$readableStreams)." frozen=".count(self::$frozen).($nl ? "\n" : "\r"));
+        $extra = [];
+        foreach (self::$moduleActivity as $k => $v) {
+            $extra[] = "$k=$v";
+        }
+        fwrite(STDERR, "co: tick=".self::$tickCount." tot=".self::$instanceCount." read=".count(self::$readableStreams)." write=".count(self::$readableStreams)." ".implode(" ", $extra).($nl ? "\n" : "\r"));
     }
 
     protected static function describeFunction(callable $callable): string {
@@ -624,4 +567,17 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
         return "function $name() in file $file:$line";
     }
 
+    private static function interpolateString(string $message, array $vars=[]): string {
+        // build a replacement array with braces around the context keys
+        $replace = array();
+        foreach ($vars as $key => $val) {
+            // check that the value can be cast to string
+            if (!is_array($val) && (!is_object($val) || method_exists($val, '__toString'))) {
+                $replace['{' . $key . '}'] = $val;
+            }
+        }
+
+        // interpolate replacement values into the message and return
+        return strtr($message, $replace);
+    }
 }

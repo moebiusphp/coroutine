@@ -49,12 +49,14 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
     public static function go(Closure $coroutine, mixed ...$args): Coroutine {
         $co = new self($coroutine, $args);
 
-        $old = self::$current;
-        self::$current = $co;
+        // swap in this coroutine temporarily and let it run one iteration
+        $current = self::$modules['core.coroutines']->current;
+        self::$modules['core.coroutines']->current = $co;
 
         $co->stepSignal();
 
-        self::$current = $old;
+        // swap back whatever previous coroutine (if any)
+        self::$modules['core.coroutines']->current = $current;
 
         return $co;
     }
@@ -132,9 +134,9 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      * is called.
      */
     public static function drain(): void {
+        self::bootstrap();
         if ($co = self::getCurrent()) {
-            unset(self::$coroutines[$co->id]);
-            self::$zombies[] = $co;
+            self::$modules['core.coroutines.zombies']->bury($co);
             self::suspend();
         } else {
             self::runLoop(function() {
@@ -198,25 +200,31 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      */
     private int $stepCount = 0;
 
+    public readonly int $id;
     public readonly string $name;
+
+    private static int $nextAvailableId = 0;
 
     /**
      * Create a new coroutine instance and add it to the coroutine loop
      */
     private function __construct(Closure $coroutine, array $args) {
+        $this->id = self::$nextAvailableId++;
         $this->name = self::describeFunction($coroutine);
         self::bootstrap();
         self::$instanceCount++;
-        $this->id = self::$nextId++;
-        self::$coroutines[$this->id] = $this;
         $this->fiber = new Fiber($coroutine);
         $this->args = $args;
+        self::$modules['core.coroutines']->add($this);
     }
 
     /**
      * Run the coroutine for one iteration.
      */
     protected function stepSignal(): void {
+        if (self::$modules['core.coroutines']->current !== $this) {
+            die("mismatch");
+        }
         try {
             $this->startTimeNS = hrtime(true);
             if ($this->fiber->isSuspended()) {
@@ -246,12 +254,22 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
             $this->stepCount++;
 
             if ($this->fiber->isTerminated()) {
-                unset(self::$coroutines[$this->id]);
+                self::$modules['core.coroutines']->terminated($this);
                 $this->fulfill($this->fiber->getReturn());
             }
         } catch (\Throwable $e) {
-            unset(self::$coroutines[$this->id]);
+            self::writeLog('[coroutine {id}] Coroutine threw {class}: {message} in {file}:{line}', [
+                'class' => get_class($e),
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+
+            self::$modules['core.coroutines']->deactivate($this);
             $this->reject($e);
+        }
+        if (self::$modules['core.coroutines']->current !== $this) {
+            die("mismatch");
         }
     }
 

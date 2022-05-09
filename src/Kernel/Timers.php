@@ -1,9 +1,11 @@
 <?php
 namespace Moebius\Coroutine\Kernel;
 
+use Closure;
 use Moebius\Coroutine;
 use Moebius\Coroutine\KernelModule;
-use SplMinHeap, Fiber;
+use Moebius\Coroutine\Kernel\EventHandler;
+use Moebius\Coroutine\Kernel\Timers\MinHeap;
 
 /**
  * @internal
@@ -13,30 +15,59 @@ use SplMinHeap, Fiber;
 class Timers extends KernelModule {
     public static string $name = 'core.timers';
 
-    private SplMinHeap $scheduledCallbacks;
-    private SplMinHeap $scheduledCoroutines;
+    private MinHeap $schedule;
+    private array $timers;
 
-    /**
-     * Remove a coroutine from the loop, and put it back again after a delay
-     * given in seconds.
-     */
-    public function suspendCoroutine(Coroutine $co, float $seconds): void {
-        $time = self::getTime() + $seconds;
-        self::$debug && $this->log("Coroutine {id} is being suspended for {seconds} seconds until {time}", ['id' => $co->id, 'seconds' => $seconds, 'time' => $time]);
-        self::$modules['core.coroutines']->deactivate($co);
-        $this->scheduledCoroutines->insert([ $time, $co ]);
-        ++self::$moduleActivity[self::$name];
+    private static int $nextTimerId = 0;
 
-        if (self::getCurrent() === $co) {
-            // If coroutine suspended itself
-            Fiber::suspend();
-        }
+    public function getNextEventTime(): ?float {
+        return $this->schedule->isEmpty() ? null : $this->schedule->top()->timeout;
     }
 
-    public function scheduleCallback(callable $callback, float $seconds): void {
-        self::$debug && $this->log("Callback scheduled in {seconds} seconds", ['seconds' => $seconds]);
-        $this->scheduledCallbacks->insert([ self::getTime() + $seconds, $callback ]);
+    /**
+     * Schedule a future callback or enabling of a coroutine.
+     *
+     * @param Closure|Coroutine $c  The coroutine to reactivate or callback to run
+     * @param float $seconds        Number of seconds to wait before running
+     * @param mixed $extra          For callbacks, an optional argument when running the callback
+     */
+    public function schedule(Closure|Coroutine $c, float $seconds, mixed $extra=null): int {
+        $event = new EventHandler($c, $seconds, $extra);
+
+        if (self::$debug) {
+            if ($c instanceof Coroutine) {
+                $this->log("Event {eventId}: Coroutine {id} is being suspended for {seconds} seconds until {time}", ['eventId' => $event->id, 'id' => $c->id, 'seconds' => $seconds, 'time' => $event->timeout]);
+            } else {
+                $this->log("Event {eventId}: Closure scheduled in {seconds} seconds at {time}", ['eventId' => $event->id, 'seconds' => $seconds, 'time' => $event->timeout]);
+            }
+        }
+
+        if ($c instanceof Coroutine) {
+            self::$modules['core.coroutines']->deactivate($c);
+        }
+
+        $this->schedule->insert($event);
+        $this->timers[$event->id] = $event;
         ++self::$moduleActivity[self::$name];
+
+        return $event->id;
+    }
+
+    public function cancel(int $timerId): void {
+        if (!isset($this->timers[$timerId])) {
+            return;
+        }
+        --self::$moduleActivity[self::$name];
+
+        $event = $this->timers[$timerId];
+
+        if ($event->value instanceof Coroutine) {
+            self::$debug && $this->log("Event {eventId}: Coroutine {id} reactivated after cancelled schedule", ['eventId' => $event->id, 'id' => $event->value->id]);
+            self::$modules['core.coroutines']->activate($event->value);
+        }
+
+        $event->cancelled();
+        unset($this->timers[$timerId]);
     }
 
     private function log(string $message, array $vars=[]): void {
@@ -45,38 +76,39 @@ class Timers extends KernelModule {
 
     public function start(): void {
         $this->log("Start");
-        $this->pausedCoroutines = [];
-        $this->scheduledCoroutines = new SplMinHeap();
-        $this->scheduledCallbacks = new SplMinHeap();
+        $this->schedule = new MinHeap();
+        $this->timers = [];
         self::$moduleActivity[self::$name] = 0;
 
         self::$hookBeforeTick[self::$name] = function() {
             $now = self::getTime();
 
             /**
-             * Run scheduled callbacks
+             * Run scheduled events
              */
-            while (!$this->scheduledCallbacks->isEmpty() && $this->scheduledCallbacks->top()[0] < $now) {
-                self::$debug && $this->log("Scheduled callback invoked at {now}", ['now' => $now]);
-                $callback = $this->scheduledCallbacks->extract()[1];
-                $callback();
+            while (!$this->schedule->isEmpty() && $this->schedule->top()->timeout <= $now) {
+                $event = $this->schedule->extract();
+                if (!isset($this->timers[$event->id])) {
+                    // event has been cancelled
+                    continue;
+                }
                 --self::$moduleActivity[self::$name];
-            }
-
-            /**
-             * Enable scheduled coroutines
-             */
-            while (!$this->scheduledCoroutines->isEmpty() && $this->scheduledCoroutines->top()[0] < $now) {
-                $co = $this->scheduledCoroutines->extract()[1];
-                self::$debug && $this->log("Scheduled coroutine {id} invoked at {now}", ['now' => $now, 'id' => $co->id]);
-                --self::$moduleActivity[self::$name];
-                self::$modules['core.coroutines']->activate($co);
+                if ($event->value instanceof Coroutine) {
+                    self::$debug && $this->log("Event {eventId}: Scheduled coroutine {id} activated at {now}", ['eventId' => $event->id, 'now' => $now, 'id' => $event->value->id]);
+                    self::$modules['core.coroutines']->activate($event->value);
+                } else {
+                    self::$debug && $this->log("Event {eventId}: Scheduled callback invoked at {now}", ['eventId' => $event->id, 'now' => $now]);
+                    self::invoke($event->value, $event->extra);
+                }
+                $event->activated();
             }
         };
     }
 
     public function stop(): void {
         $this->log("Stop");
+        $this->timers = [];
+        $this->schedule = new MinHeap();
         unset(self::$hookBeforeTick[self::$name]);
         unset(self::$moduleActivity[self::$name]);
     }

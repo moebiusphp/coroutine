@@ -48,7 +48,9 @@ class Promises extends KernelModule {
             }
         }
 
-
+        /**
+         * Watch the result from this promise and store it in the $state and $result variables
+         */
         $thenable->then(function($value) use (&$state, &$result, $co) {
             if ($state !== 0) {
                 throw new PromiseResolvedException("Promise invoked two listeners");
@@ -58,7 +60,7 @@ class Promises extends KernelModule {
             if ($co) {
                 self::$debug && $this->log("Coroutine {id} has promise fulfilled", ['id' => $co->id]);
                 --self::$moduleActivity[self::$name];
-                self::$coroutines[$co->id] = $co;
+                self::$modules['core.coroutines']->activate($co);
             } else {
                 self::$debug && $this->log("Global routine has promise fulfilled");
             }
@@ -71,7 +73,7 @@ class Promises extends KernelModule {
             if ($co) {
                 self::$debug && $this->log("Coroutine {id} has promise rejected", ['id' => $co->id]);
                 --self::$moduleActivity[self::$name];
-                self::$coroutines[$co->id] = $co;
+                self::$modules['core.coroutines']->activate($co);
             } else {
                 self::$debug && $this->log("Global routine {id} has promise rejected");
             }
@@ -79,6 +81,7 @@ class Promises extends KernelModule {
 
         if ($co) {
             ++self::$moduleActivity[self::$name];
+            self::$modules['core.coroutines']->deactivate($co);
             self::suspend();
         } else {
             self::runLoop(function() use (&$state) {
@@ -93,7 +96,7 @@ class Promises extends KernelModule {
             }
             throw $result;
         } else {
-            throw new InternalLogicException("Loop stopped without promise being resolved");
+            throw new InternalLogicException("Promise not resolved but coroutine or loop ended");
         }
     }
 

@@ -43,6 +43,11 @@ class NoCoroutineContextException extends LogicException {}
 class RuntimeException extends \RuntimeException {}
 
 /**
+ * Generic runtime IO error
+ */
+class IOException extends RuntimeException {}
+
+/**
  * Exception when a promise was expected.
  */
 class PromiseExpectedException extends RuntimeException {}

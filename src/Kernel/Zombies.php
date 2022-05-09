@@ -30,6 +30,9 @@ class Zombies extends KernelModule {
         self::$debug && $this->log("Burying coroutine {id}", ['id' => $co->id]);
         self::$modules['core.coroutines']->deactivate($co);
         $this->zombies[$co->id] = $co;
+        if (!isset(self::$hookAfterTick[self::$name])) {
+            self::$hookAfterTick[self::$name] = $this->reviveAll(...);
+        }
     }
 
     public function revive(Coroutine $co): void {
@@ -37,6 +40,14 @@ class Zombies extends KernelModule {
         self::$debug && $this->log("Reviving coroutine {id}", ['id' => $co->id]);
         unset($this->zombies[$co->id]);
         self::$modules['core.coroutines']->activate($co);
+    }
+
+    private function reviveAll(): void {
+        unset(self::$hookAfterTick[self::$name]);
+        foreach ($this->zombies as $id => $co) {
+            self::$modules['core.coroutines']->activate($co);
+        }
+        $this->zombies = [];
     }
 
     private function log(string $message, array $vars=[]): void {

@@ -1,15 +1,9 @@
 <?php
 namespace Moebius\Coroutine\Kernel;
 
-use Moebius\Promise;
 use Moebius\Coroutine;
 use Moebius\Coroutine\{
-    KernelModule,
-    InternalLogicException,
-    RejectedException,
-    PromiseResolvedException,
-    ThenableExpectedException,
-    NoCoroutineContextException
+    KernelModule, InternalLogicException
 };
 use WeakMap;
 
@@ -71,6 +65,9 @@ class Coroutines extends KernelModule {
      * Whenever coroutines are terminated this function must be called.
      */
     public function terminated(Coroutine $co): void {
+        if (!$co->fiber->isTerminated()) {
+            $this->log("Coroutine {id} was marked as terminated without being terminated");
+        }
         self::$debug && $this->log("Coroutine {id} has been terminated", ['id' => $co->id]);
         if (!isset($this->coroutines[$co->id])) {
             throw new InternalLogicException("Coroutine ".$co->id." is not active");

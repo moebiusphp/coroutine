@@ -26,15 +26,23 @@ final class WaitGroup extends Kernel {
     }
 
     public function wait(): void {
-        if ($self = self::getCurrent()) {
-
-            $this->waiting[$self->id] = $self;
-            unset(self::$coroutines[$self->id]);
+        if ($co = self::getCurrent()) {
+            /**
+             * Remove coroutine from loop, it will be reinserted when
+             * WaitGroup finishes.
+             */
+            $this->waiting[$co->id] = $co;
+            self::$modules['core.coroutines']->deactivate($co);
             self::suspend();
-
         } else {
+            /**
+             * We're in the global routine, so we'll let coroutines
+             * progress until the waitgroup resolves. If no coroutines
+             * are running, then the waitgroup can never be resolved.
+             */
             while ($this->value > 0) {
-                if (self::tick() === 0) {
+                self::suspend();
+                if (self::getActivityLevel() === 0) {
                     throw new LogicException("Can't wait for this wait group when no coroutines are active");
                 }
             }
@@ -43,7 +51,7 @@ final class WaitGroup extends Kernel {
 
     private function release(): void {
         foreach ($this->waiting as $id => $co) {
-            self::$coroutines[$id] = $co;
+            self::$modules['core.coroutines']->activate($co);
         }
         $this->waiting = [];
     }

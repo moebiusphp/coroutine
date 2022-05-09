@@ -23,6 +23,8 @@ class Unblocker {
     protected static $resources = [];
     protected static $results = [];
 
+    protected static $registered = false;
+
     private static int $lastSuspend = 0;
 
     /**
@@ -39,7 +41,6 @@ class Unblocker {
     }
 
     public static function unblock($resource): mixed {
-        self::interrupt();
         if (!is_resource($resource)) {
             return $resource;
         }
@@ -50,20 +51,28 @@ class Unblocker {
             return self::$results[$id];
         }
 
+        self::register(); // $meta['uri'] ? STREAM_IS_URL : 0);
+
         $meta = stream_get_meta_data($resource);
-        self::register($meta['uri'] ? STREAM_IS_URL : 0);
         self::$resources[$id] = $resource;
         $result = fopen('moebius-unblocker://'.$id, $meta['mode']);
         self::$results[$id] = $result;
-        self::unregister();
         return $result;
     }
 
-    protected static function register(int $flags): void {
-        stream_wrapper_register('moebius-unblocker', self::class, $flags);
+    protected static function register(): void {
+        if (self::$registered) {
+            return;
+        }
+        self::$registered = true;
+        stream_wrapper_register('moebius-unblocker', self::class, 0);
     }
 
     protected static function unregister(): void {
+        if (!self::$registered) {
+            return;
+        }
+        self::$registered = false;
         stream_wrapper_unregister('moebius-unblocker');
     }
 

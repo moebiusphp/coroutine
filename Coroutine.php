@@ -61,15 +61,23 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
         return $co;
     }
 
+    public static function unblock(mixed $resource): mixed {
+        return Coroutine\Unblocker::unblock($resource);
+    }
+
     /**
      * Await a return value from a coroutine or a promise, while allowing
      * other coroutines to perform some work.
      *
-     * @param object $thenable      A coroutine or a promise
+     * @param object $thenable      A coroutine, closure or a promise
      * @return mixed                The value returned from the coroutine
      * @throws \Throwable           Any exception thrown by the coroutine
      */
     public static function await(object $thenable): mixed {
+        self::bootstrap();
+        if (is_callable($thenable) && $thenable instanceof Closure) {
+            return self::$modules['core.promises']->awaitThenable(self::go($thenable));
+        }
         return self::$modules['core.promises']->awaitThenable($thenable);
     }
 
@@ -222,9 +230,7 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      * Run the coroutine for one iteration.
      */
     protected function stepSignal(): void {
-        if (self::$modules['core.coroutines']->current !== $this) {
-            die("mismatch");
-        }
+        assert(self::$modules['core.coroutines']->current === $this, "Mismatch between active coroutine when calling stepSignal()");
         try {
             $this->startTimeNS = hrtime(true);
             if ($this->fiber->isSuspended()) {

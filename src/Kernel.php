@@ -9,6 +9,10 @@ use Moebius\{
     Coroutine,
     Promise
 };
+use Moebius\Promise\{
+    PromiseInterface,
+    PromiseTrait
+};
 use Moebius\Coroutine\Kernel\IO;
 use Fiber, SplMinHeap;
 
@@ -18,8 +22,9 @@ use Fiber, SplMinHeap;
  *
  * @internal
  */
-abstract class Kernel extends Promise implements StaticEventEmitterInterface {
+abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
     use StaticEventEmitterTrait;
+    use PromiseTrait;
 
     /**
      * Get the current tick time. This time stamp is monotonic and can't be adjusted.

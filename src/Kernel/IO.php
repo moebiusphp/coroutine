@@ -58,7 +58,7 @@ class IO extends KernelModule {
      * Block until a resource becomes readable, writable or an exceptino occurs, or
      * until the timeout passes. Returns false if a timeout occurs.
      */
-    public function wait($resource, int $eventType, float $seconds = null): bool {
+    public function suspendUntil($resource, int $eventType, float $seconds = null): bool {
         if ($co = self::getCurrent()) {
             self::$modules['core.coroutines']->deactivate($co);
             $eventHandler = $this->watch($resource, $eventType, $co, $seconds);

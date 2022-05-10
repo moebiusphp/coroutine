@@ -23,7 +23,7 @@ use Fiber, SplMinHeap, Closure;
 /**
  * A Coroutine API for PHP, managing fibers efficiently and transparently.
  */
-final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmitterInterface {
+final class Coroutine extends Kernel implements StaticEventEmitterInterface {
     use StaticEventEmitterTrait;
     use PromiseTrait;
 
@@ -224,6 +224,7 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
         $this->fiber = new Fiber($coroutine);
         $this->args = $args;
         self::$modules['core.coroutines']->add($this);
+        $this->Promise();
     }
 
     /**

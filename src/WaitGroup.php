@@ -32,7 +32,7 @@ final class WaitGroup extends Kernel {
              * WaitGroup finishes.
              */
             $this->waiting[$co->id] = $co;
-            self::$modules['core.coroutines']->deactivate($co);
+            self::$coroutines->deactivate($co);
             self::suspend();
         } else {
             /**
@@ -51,7 +51,7 @@ final class WaitGroup extends Kernel {
 
     private function release(): void {
         foreach ($this->waiting as $id => $co) {
-            self::$modules['core.coroutines']->activate($co);
+            self::$coroutines->activate($co);
         }
         $this->waiting = [];
     }

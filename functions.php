@@ -4,6 +4,8 @@ namespace M;
 use Moebius\Coroutine as Co;
 use Moebius\Coroutine\Unblocker;
 
+Co::bootstrap();
+
 /**
  * Run a coroutine and wait for the return value or an exception
  * to be thrown. This function is intended to be used to convert

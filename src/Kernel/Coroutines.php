@@ -16,7 +16,7 @@ class Coroutines extends KernelModule {
     public static string $name = 'core.coroutines';
 
     public ?Coroutine $current = null;
-    private array $coroutines = [];
+    private array $active = [];
     private ?WeakMap $added=null;
 
     /**
@@ -29,35 +29,38 @@ class Coroutines extends KernelModule {
     }
 
     public function add(Coroutine $co): void {
+echo "Adding ".$co->id."\n";
         assert(!isset($this->added[$co]), "Coroutine was already added to kernel");
         self::$debug && $this->log("Added coroutine {id}", ['id' => $co->id]);
         $this->added[$co] = true;
-        $this->coroutines[$co->id] = $co;
+        $this->active[$co->id] = $co;
         ++self::$moduleActivity[self::$name];
     }
 
     public function isActive(Coroutine $co): bool {
         assert(isset($this->added[$co]), "Coroutine is not added to kernel");
-        return isset($this->coroutines[$co->id]);
+        return isset($this->active[$co->id]);
     }
 
     public function activate(Coroutine $co): void {
+echo "Activating ".$co->id."\n";
         assert(isset($this->added[$co]), "Coroutine is not added to kernel");
         self::$debug && $this->log("Activated coroutine {id}", ['id' => $co->id]);
-        if (isset($this->coroutines[$co->id])) {
+        if (isset($this->active[$co->id])) {
             throw new InternalLogicException("Coroutine is already activated");
         }
-        $this->coroutines[$co->id] = $co;
+        $this->active[$co->id] = $co;
         ++self::$moduleActivity[self::$name];
     }
 
     public function deactivate(Coroutine $co): void {
+echo "Deactivating ".$co->id."\n";
         assert(isset($this->added[$co]), "Coroutine is not added to kernel");
         self::$debug && $this->log("Deactivated coroutine {id}", ['id' => $co->id]);
-        if (!isset($this->coroutines[$co->id])) {
+        if (!isset($this->active[$co->id])) {
             throw new InternalLogicException("Coroutine is already deactivated");
         }
-        unset($this->coroutines[$co->id]);
+        unset($this->active[$co->id]);
         --self::$moduleActivity[self::$name];
     }
 
@@ -69,16 +72,16 @@ class Coroutines extends KernelModule {
             $this->log("Coroutine {id} was marked as terminated without being terminated");
         }
         self::$debug && $this->log("Coroutine {id} has been terminated", ['id' => $co->id]);
-        if (!isset($this->coroutines[$co->id])) {
+        if (!isset($this->active[$co->id])) {
             throw new InternalLogicException("Coroutine ".$co->id." is not active");
         }
-        unset($this->coroutines[$co->id]);
+        unset($this->active[$co->id]);
         --self::$moduleActivity[self::$name];
         unset($this->added[$co]);
     }
 
     private function tick(): void {
-        foreach ($this->coroutines as $co) {
+        foreach ($this->active as $co) {
             $this->current = $co;
             $co->stepSignal();
             foreach ($this->microTasks as $k => $task) {

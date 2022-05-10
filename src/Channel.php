@@ -76,14 +76,14 @@ class Channel extends Kernel {
     protected function awaitCanFill(): void {
         while (count($this->buffer) < $this->bufferSize) {
             do {
-                self::$modules["core.promises"]->awaitThenable($this->canFill);
+                self::$promises->awaitThenable($this->canFill);
             } while ($this->canFill->status() !== Promise::PENDING);
         }
     }
 
     protected function awaitCanDrain(): void {
         do {
-            self::$modules["core.promises"]->awaitThenable($this->canDrain);
+            self::$promises->awaitThenable($this->canDrain);
         } while ($this->canFill->status() !== Promise::PENDING);
     }
 

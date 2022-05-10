@@ -43,7 +43,7 @@ class IO extends KernelModule {
         self::$debug && $this->log("Watcher {watcherId} on resource {id} for event type {eventType} with timeout {seconds} seconds", ['watcherId' => $handler->id, 'id' => get_resource_id($resource), 'eventType' => $eventType, 'seconds' => $seconds ?? 'NULL']);
 
         if ($seconds !== null) {
-            self::$modules['core.timers']->schedule($this->cancel(...), $seconds, $handler->id);
+            self::$timers->schedule($this->cancel(...), $seconds, $handler->id);
         }
 
         $this->handlers[$handler->id] = $handler;
@@ -60,7 +60,7 @@ class IO extends KernelModule {
      */
     public function wait($resource, int $eventType, float $seconds = null): bool {
         if ($co = self::getCurrent()) {
-            self::$modules['core.coroutines']->deactivate($co);
+            self::$coroutines->deactivate($co);
             $eventHandler = $this->watch($resource, $eventType, $co, $seconds);
             self::suspend();
         } else {
@@ -73,13 +73,17 @@ class IO extends KernelModule {
         return $eventHandler->result();
     }
 
+    public function on($resource, int $eventType, Closure $callback, float $seconds=null): int {
+        return $this->watch($resource, $eventType, $callback, $seconds)->id;
+    }
+
     public function cancel(int $id): void {
         if (!isset($this->handlers[$id])) {
             return;
         }
         self::$debug && $this->log("Cancelling IO watcher {id}", ['id' => $id]);
         if ($this->handlers[$id]->value instanceof Coroutine) {
-            self::$modules['core.coroutines']->activate($this->handlers[$id]->value);
+            self::$coroutines->activate($this->handlers[$id]->value);
         }
         $this->handlers[$id]->cancelled();
         unset($this->handlers[$id]);
@@ -100,13 +104,13 @@ class IO extends KernelModule {
             $sleepTime = 0;
         } elseif (self::$moduleActivity['core.timers'] !== 0) {
             // there are pending timers
-            $sleepTime = (self::$modules['core.timers']->getNextEventTime() - self::getRealTime()) - 0.001;
+            $sleepTime = (self::$timers->getNextEventTime() - self::getRealTime()) - 0.001;
             if ($sleepTime < 0) {
                 $sleepTime = 0;
             }
         } else {
             // we are only waiting for IO, so we can sleep long long time
-            $sleepTime = 0.1;
+            $sleepTime = 0.125;
         }
 
         $this->performStreamSelect($sleepTime);
@@ -123,15 +127,14 @@ class IO extends KernelModule {
                 $this->cancel($handler->id);
                 continue;
             }
-            $resourceId = get_resource_id($resource);
             if (0 !== ($handler->extra & self::READABLE)) {
-                $readableStreams[$resourceId] = $resource;
+                $readableStreams[] = $resource;
             }
             if (0 !== ($handler->extra & self::WRITABLE)) {
-                $writableStreams[$resourceId] = $resource;
+                $writableStreams[] = $resource;
             }
             if (0 !== ($handler->extra & self::EXCEPTION)) {
-                $exceptionStreams[$resourceId] = $resource;
+                $exceptionStreams[] = $resource;
             }
         }
 
@@ -151,10 +154,12 @@ class IO extends KernelModule {
          * check that a resource is actually readable. Not sure if it helps, but it is very
          * cheap to do - so here goes.
          */
+/*
         $count2 = @stream_select($readableStreams, $writableStreams, $exceptionStreams, 0, 0);
         if ($count2 === false || $count2 === 0) {
             return;
         }
+*/
 
         $readableIds = array_map(get_resource_id(...), $readableStreams);
         $writableIds = array_map(get_resource_id(...), $writableStreams);
@@ -172,7 +177,7 @@ class IO extends KernelModule {
                 unset($this->handlers[$handler->id]);
                 unset($this->resources[$handler->id]);
                 if ($handler->value instanceof Coroutine) {
-                    self::$modules['core.coroutines']->activate($handler->value);
+                    self::$coroutines->activate($handler->value);
                 } else {
                     self::invoke($handler->value);
                 }
@@ -186,7 +191,6 @@ class IO extends KernelModule {
         $this->log("Start");
         self::$moduleActivity[self::$name] = 0;
         self::$hookBeforeTick[self::$name] = $this->onBeforeTick(...);
-        $this->coroutines = [];
         $this->readable = [];
         $this->writable = [];
     }
@@ -195,7 +199,6 @@ class IO extends KernelModule {
         $this->log("Stop");
         unset(self::$moduleActivity[self::$name]);
         unset(self::$hookBeforeTick[self::$name]);
-        $this->coroutines = [];
         $this->readable = [];
         $this->writable = [];
     }

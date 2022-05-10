@@ -21,13 +21,16 @@ use Fiber, SplMinHeap;
 abstract class Kernel extends Promise implements StaticEventEmitterInterface {
     use StaticEventEmitterTrait;
 
+    protected static Kernel\Coroutines $coroutines;
+    protected static Kernel\IO $io;
+    protected static Kernel\Promises $promises;
+    protected static Kernel\Timers $timers;
+    protected static Kernel\Zombies $zombies;
+
     /**
      * Get the current tick time. This time stamp is monotonic and can't be adjusted.
      */
     public static function getTime(): float {
-        if (self::$currentTime === 0) {
-            self::bootstrap();
-        }
         return self::$currentTime;
     }
 
@@ -176,8 +179,7 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
      * @return bool                 false if the stream is not readable (timed out or closed)
      */
     protected static function readable(mixed $resource, float $timeout=null): bool {
-        self::bootstrap();
-        return self::$modules['core.io']->wait($resource, IO::READABLE, $timeout);
+        return self::$io->wait($resource, IO::READABLE, $timeout);
     }
 
     /**
@@ -189,8 +191,7 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
      * @return bool                 false if the stream is no writable (timed out)
      */
     protected static function writable(mixed $resource, float $timeout=null): bool {
-        self::bootstrap();
-        return self::$modules['core.io']->wait($resource, IO::WRITABLE, $timeout);
+        return self::$io->wait($resource, IO::WRITABLE, $timeout);
     }
 
     /**
@@ -200,9 +201,8 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
      * @param float $seconds Number of seconds to sleep
      */
     protected static function sleep(float $seconds): void {
-        self::bootstrap();
         if ($co = self::getCurrent()) {
-            self::$modules['core.timers']->schedule($co, $seconds);
+            self::$timers->schedule($co, $seconds);
             self::suspend();
         } else {
             $expires = self::getRealTime() + $seconds;
@@ -233,7 +233,6 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
      * @param callable $resumeFunction
      */
     protected static function runLoop(callable $resumeFunction): void {
-        self::bootstrap();
         if (self::getCurrent()) {
             throw new InternalLogicException("Can't call Kernel::runLoop() from within a coroutine");
         }
@@ -319,7 +318,7 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
             $hook();
         }
 
-        if (self::$modules['core.coroutines']->current) {
+        if (self::$coroutines->current) {
             // This happens whenever a die() or exit() or a fatal error
             // occurred inside a coroutine.
             self::cleanup();
@@ -346,7 +345,17 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
      * Fiber being executed.
      */
     protected static function getCurrent(): ?self {
-        $current = self::$modules['core.coroutines']->current;
+        assert(Fiber::getCurrent() === self::$coroutines->current, "Fiber and coroutine mismatch");
+        return self::$coroutines->current;
+        $fiber = Fuber::getCurrent();
+        if ($fiber === null) {
+            return null;
+        }
+        $current = self::$coroutines->current;
+        if ($fiber === null) {
+            return null;
+        }
+        assert($current === $fiber);
         $fiber = Fiber::getCurrent();
         if ($fiber === null && $current === null) {
             return null;
@@ -410,8 +419,14 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
             self::$modules[$module::$name]->start();
         }
 
+        self::$coroutines = self::$modules['core.coroutines'];
+        self::$io = self::$modules['core.io'];
+        self::$timers = self::$modules['core.timers'];
+        self::$promises = self::$modules['core.promises'];
+        self::$zombies = self::$modules['core.zombies'];
+
         $bootstrapped = true;
-//        self::$timers = new SplMinHeap();
+
         register_shutdown_function(self::onAppTerminate(...));
         self::events()->emit(self::BOOTSTRAP_EVENT, (object) [], false);
     }
@@ -423,7 +438,7 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
     }
 
     protected static function writeLog(string $message, array $vars=[]): void {
-//        fwrite(STDERR, gmdate('Y-m-d H:i:s').' '.self::interpolateString(trim($message), $vars)."\n");
+        fwrite(STDERR, gmdate('Y-m-d H:i:s').' '.self::interpolateString(trim($message), $vars)."\n");
     }
 
     /**

@@ -14,6 +14,7 @@ use Moebius\Coroutine\{
     CoroutineExpectedException,
     UnknownFiberException
 };
+use Moebius\Coroutine\Kernel\IO;
 use Moebius\Promise\{
     PromiseInterface,
     PromiseTrait
@@ -50,13 +51,13 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
         $co = new self($coroutine, $args);
 
         // swap in this coroutine temporarily and let it run one iteration
-        $current = self::$modules['core.coroutines']->current;
-        self::$modules['core.coroutines']->current = $co;
+        $current = self::$coroutines->current;
+        self::$coroutines->current = $co;
 
         $co->stepSignal();
 
         // swap back whatever previous coroutine (if any)
-        self::$modules['core.coroutines']->current = $current;
+        self::$coroutines->current = $current;
 
         return $co;
     }
@@ -74,11 +75,10 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      * @throws \Throwable           Any exception thrown by the coroutine
      */
     public static function await(object $thenable): mixed {
-        self::bootstrap();
         if (is_callable($thenable) && $thenable instanceof Closure) {
-            return self::$modules['core.promises']->awaitThenable(self::go($thenable));
+            return self::$promises->awaitThenable(self::go($thenable));
         }
-        return self::$modules['core.promises']->awaitThenable($thenable);
+        return self::$promises->awaitThenable($thenable);
     }
 
     /**
@@ -142,9 +142,8 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      * is called.
      */
     public static function drain(): void {
-        self::bootstrap();
         if ($co = self::getCurrent()) {
-            self::$modules['core.coroutines.zombies']->bury($co);
+            self::$zombies->bury($co);
             self::suspend();
         } else {
             self::runLoop(function() {
@@ -218,19 +217,19 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      */
     private function __construct(Closure $coroutine, array $args) {
         $this->id = self::$nextAvailableId++;
+echo "Creating coroutine ".$this->id."\n";
         $this->name = self::describeFunction($coroutine);
-        self::bootstrap();
         self::$instanceCount++;
         $this->fiber = new Fiber($coroutine);
         $this->args = $args;
-        self::$modules['core.coroutines']->add($this);
+        self::$coroutines->add($this);
     }
 
     /**
      * Run the coroutine for one iteration.
      */
     protected function stepSignal(): void {
-        assert(self::$modules['core.coroutines']->current === $this, "Mismatch between active coroutine when calling stepSignal()");
+        assert(self::$coroutines->current === $this, "Mismatch between active coroutine when calling stepSignal()");
         try {
             $this->startTimeNS = hrtime(true);
             if ($this->fiber->isSuspended()) {
@@ -260,7 +259,7 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
             $this->stepCount++;
 
             if ($this->fiber->isTerminated()) {
-                self::$modules['core.coroutines']->terminated($this);
+                self::$coroutines->terminated($this);
                 $this->fulfill($this->fiber->getReturn());
             }
         } catch (\Throwable $e) {
@@ -271,11 +270,8 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
                 'line' => $e->getLine()
             ]);
 
-            self::$modules['core.coroutines']->deactivate($this);
+            self::$coroutines->deactivate($this);
             $this->reject($e);
-        }
-        if (self::$modules['core.coroutines']->current !== $this) {
-            die("mismatch");
         }
     }
 
@@ -283,6 +279,7 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      * The coroutine has terminated
      */
     public function __destruct() {
+        echo "Destructing ".$this->id."\n";
         self::$instanceCount--;
         if (self::$debug) {
             self::dumpStats();

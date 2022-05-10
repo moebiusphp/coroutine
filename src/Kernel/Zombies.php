@@ -21,33 +21,33 @@ use WeakMap;
  * to the loop activity count.
  */
 class Zombies extends KernelModule {
-    public static string $name = 'core.coroutines.zombies';
+    public static string $name = 'core.zombies';
 
-    private array $zombies = [];
+    private array $active = [];
 
     public function bury(Coroutine $co): void {
-        assert(!isset($this->zombies[$co->id]), "Coroutine is already a zombie");
+        assert(!isset($this->active[$co->id]), "Coroutine is already a zombie");
         self::$debug && $this->log("Burying coroutine {id}", ['id' => $co->id]);
-        self::$modules['core.coroutines']->deactivate($co);
-        $this->zombies[$co->id] = $co;
+        self::$coroutines->deactivate($co);
+        $this->active[$co->id] = $co;
         if (!isset(self::$hookAfterTick[self::$name])) {
             self::$hookAfterTick[self::$name] = $this->reviveAll(...);
         }
     }
 
     public function revive(Coroutine $co): void {
-        assert(isset($this->zombies[$co->id]), "Coroutine is not zombified");
+        assert(isset($this->active[$co->id]), "Coroutine is not zombified");
         self::$debug && $this->log("Reviving coroutine {id}", ['id' => $co->id]);
-        unset($this->zombies[$co->id]);
-        self::$modules['core.coroutines']->activate($co);
+        unset($this->active[$co->id]);
+        self::$coroutines->activate($co);
     }
 
     private function reviveAll(): void {
         unset(self::$hookAfterTick[self::$name]);
-        foreach ($this->zombies as $id => $co) {
-            self::$modules['core.coroutines']->activate($co);
+        foreach ($this->active as $id => $co) {
+            self::$coroutines->activate($co);
         }
-        $this->zombies = [];
+        $this->active = [];
     }
 
     private function log(string $message, array $vars=[]): void {

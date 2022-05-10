@@ -16,7 +16,7 @@ class Timers extends KernelModule {
     public static string $name = 'core.timers';
 
     private MinHeap $schedule;
-    private array $timers;
+    private array $active;
 
     private static int $nextTimerId = 0;
 
@@ -43,31 +43,31 @@ class Timers extends KernelModule {
         }
 
         if ($c instanceof Coroutine) {
-            self::$modules['core.coroutines']->deactivate($c);
+            self::$coroutines->deactivate($c);
         }
 
         $this->schedule->insert($event);
-        $this->timers[$event->id] = $event;
+        $this->active[$event->id] = $event;
         ++self::$moduleActivity[self::$name];
 
         return $event->id;
     }
 
     public function cancel(int $timerId): void {
-        if (!isset($this->timers[$timerId])) {
+        if (!isset($this->active[$timerId])) {
             return;
         }
         --self::$moduleActivity[self::$name];
 
-        $event = $this->timers[$timerId];
+        $event = $this->active[$timerId];
 
         if ($event->value instanceof Coroutine) {
             self::$debug && $this->log("Event {eventId}: Coroutine {id} reactivated after cancelled schedule", ['eventId' => $event->id, 'id' => $event->value->id]);
-            self::$modules['core.coroutines']->activate($event->value);
+            self::$coroutines->activate($event->value);
         }
 
         $event->cancelled();
-        unset($this->timers[$timerId]);
+        unset($this->active[$timerId]);
     }
 
     private function log(string $message, array $vars=[]): void {
@@ -77,7 +77,7 @@ class Timers extends KernelModule {
     public function start(): void {
         $this->log("Start");
         $this->schedule = new MinHeap();
-        $this->timers = [];
+        $this->active = [];
         self::$moduleActivity[self::$name] = 0;
 
         self::$hookBeforeTick[self::$name] = function() {
@@ -88,14 +88,14 @@ class Timers extends KernelModule {
              */
             while (!$this->schedule->isEmpty() && $this->schedule->top()->timeout <= $now) {
                 $event = $this->schedule->extract();
-                if (!isset($this->timers[$event->id])) {
+                if (!isset($this->active[$event->id])) {
                     // event has been cancelled
                     continue;
                 }
                 --self::$moduleActivity[self::$name];
                 if ($event->value instanceof Coroutine) {
                     self::$debug && $this->log("Event {eventId}: Scheduled coroutine {id} activated at {now}", ['eventId' => $event->id, 'now' => $now, 'id' => $event->value->id]);
-                    self::$modules['core.coroutines']->activate($event->value);
+                    self::$coroutines->activate($event->value);
                 } else {
                     self::$debug && $this->log("Event {eventId}: Scheduled callback invoked at {now}", ['eventId' => $event->id, 'now' => $now]);
                     self::invoke($event->value, $event->extra);
@@ -107,7 +107,7 @@ class Timers extends KernelModule {
 
     public function stop(): void {
         $this->log("Stop");
-        $this->timers = [];
+        $this->active = [];
         $this->schedule = new MinHeap();
         unset(self::$hookBeforeTick[self::$name]);
         unset(self::$moduleActivity[self::$name]);

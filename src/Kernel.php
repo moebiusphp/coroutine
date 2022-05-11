@@ -9,6 +9,10 @@ use Moebius\{
     Coroutine,
     Promise
 };
+use Moebius\Promise\{
+    PromiseInterface,
+    PromiseTrait
+};
 use Moebius\Coroutine\Kernel\IO;
 use Fiber, SplMinHeap;
 
@@ -18,8 +22,9 @@ use Fiber, SplMinHeap;
  *
  * @internal
  */
-abstract class Kernel extends Promise implements StaticEventEmitterInterface {
+abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
     use StaticEventEmitterTrait;
+    use PromiseTrait;
 
     protected static Kernel\Coroutines $coroutines;
     protected static Kernel\IO $io;
@@ -179,7 +184,7 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
      * @return bool                 false if the stream is not readable (timed out or closed)
      */
     protected static function readable(mixed $resource, float $timeout=null): bool {
-        return self::$io->wait($resource, IO::READABLE, $timeout);
+        return self::$io->suspendUntil($resource, IO::READABLE, $timeout);
     }
 
     /**
@@ -191,7 +196,7 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
      * @return bool                 false if the stream is no writable (timed out)
      */
     protected static function writable(mixed $resource, float $timeout=null): bool {
-        return self::$io->wait($resource, IO::WRITABLE, $timeout);
+        return self::$io->suspendUntil($resource, IO::WRITABLE, $timeout);
     }
 
     /**
@@ -314,23 +319,24 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
      * Run all coroutines until there are no more coroutines to run.
      */
     protected static function onAppTerminate(): void {
-        foreach (self::$hookAppTerminate as $k => $hook) {
-            $hook();
-        }
-
-        if (self::$coroutines->current) {
-            // This happens whenever a die() or exit() or a fatal error
-            // occurred inside a coroutine.
-            self::cleanup();
-            return;
-        }
-
         // Don't run if we're coming from a fatal error (uncaught exception).
         $error = error_get_last();
         if ((isset($error['type']) ? $error['type'] : 0) & (E_ERROR | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR | E_RECOVERABLE_ERROR)) {
             self::writeLog('[core] Termination error {type}: {message} in {file}:{line}', $error);
             return;
         }
+
+        foreach (self::$hookAppTerminate as $k => $hook) {
+            $hook();
+        }
+
+        if (self::$coroutines->getCurrent()) {
+            // This happens whenever a die() or exit() or a fatal error
+            // occurred inside a coroutine.
+            self::cleanup();
+            return;
+        }
+
 
         self::runLoop(function() {
             return true;
@@ -345,8 +351,12 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
      * Fiber being executed.
      */
     protected static function getCurrent(): ?self {
-        assert(Fiber::getCurrent() === self::$coroutines->current, "Fiber and coroutine mismatch");
-        return self::$coroutines->current;
+        assert(
+            Fiber::getCurrent() === self::$coroutines->getCurrentCoroutine()?->fiber,
+            "Fiber and coroutine ".json_encode(self::$coroutines->getCurrentCoroutine()?->id)." mismatch"
+        );
+        return self::$coroutines->getCurrentCoroutine();
+
         $fiber = Fuber::getCurrent();
         if ($fiber === null) {
             return null;
@@ -372,16 +382,11 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
         throw new UnknownFiberException("The current fiber does not match the current coroutine");
     }
 
-    protected static function invoke(\Closure $callable, mixed ...$args) {
+    protected static function invoke(\Closure $callable, mixed ...$args): mixed {
         try {
-            $callable(...$args);
+            return $callable(...$args);
         } catch (\Throwable $e) {
-            self::writeLog('[kernel] Closure threw {class}: {message} in {file}:{line}', [
-                'class' => get_class($e),
-                'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine()
-            ]);
+            self::writeLogException($e);
         }
     }
 
@@ -438,7 +443,18 @@ abstract class Kernel extends Promise implements StaticEventEmitterInterface {
     }
 
     protected static function writeLog(string $message, array $vars=[]): void {
-        fwrite(STDERR, gmdate('Y-m-d H:i:s').' '.self::interpolateString(trim($message), $vars)."\n");
+        self::$debug && fwrite(STDERR, gmdate('Y-m-d H:i:s').' '.self::interpolateString(trim($message), $vars)."\n");
+    }
+
+    protected static function logException(\Throwable $e) {
+        self::writeLog("[kernel] {class}: {message} in {file}:{line}. Trace:\n{trace}", [
+            'class' => get_class($e),
+            'message' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'trace' => $e->getTraceAsString(),
+        ]);
+
     }
 
     /**

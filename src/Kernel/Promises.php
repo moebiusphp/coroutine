@@ -51,7 +51,8 @@ class Promises extends KernelModule {
         /**
          * Watch the result from this promise and store it in the $state and $result variables
          */
-        $thenable->then(function($value) use (&$state, &$result, $co) {
+        $coroutineDeactivated = false;
+        $thenable->then(function($value) use (&$state, &$result, $co, &$coroutineDeactivated) {
             if ($state !== 0) {
                 throw new PromiseResolvedException("Promise invoked two listeners");
             }
@@ -59,12 +60,14 @@ class Promises extends KernelModule {
             $result = $value;
             if ($co) {
                 self::$debug && $this->log("Coroutine {id} has promise fulfilled", ['id' => $co->id]);
-                --self::$moduleActivity[self::$name];
-                self::$coroutines->activate($co);
+                if ($coroutineDeactivated) {
+                    --self::$moduleActivity[self::$name];
+                    self::$coroutines->activate($co);
+                }
             } else {
                 self::$debug && $this->log("Global routine has promise fulfilled");
             }
-        }, function($reason) use (&$state, &$result, $co) {
+        }, function($reason) use (&$state, &$result, $co, &$coroutineDeactivated) {
             if ($state !== 0) {
                 throw new PromiseResolvedException("Promise invoked two listeners");
             }
@@ -72,21 +75,27 @@ class Promises extends KernelModule {
             $result = $reason;
             if ($co) {
                 self::$debug && $this->log("Coroutine {id} has promise rejected", ['id' => $co->id]);
-                --self::$moduleActivity[self::$name];
-                self::$coroutines->activate($co);
+                if ($coroutineDeactivated) {
+                    --self::$moduleActivity[self::$name];
+                    self::$coroutines->activate($co);
+                }
             } else {
                 self::$debug && $this->log("Global routine {id} has promise rejected");
             }
         });
 
-        if ($co) {
-            ++self::$moduleActivity[self::$name];
-            self::$coroutines->deactivate($co);
-            self::suspend();
-        } else {
-            self::runLoop(function() use (&$state) {
-                return $state === 0;
-            });
+        if ($state === 0) {
+            // promise may already have been resolved
+            if ($co) {
+                ++self::$moduleActivity[self::$name];
+                $coroutineDeactivated = true;
+                self::$coroutines->deactivate($co);
+                self::suspend();
+            } else {
+                self::runLoop(function() use (&$state) {
+                    return $state === 0;
+                });
+            }
         }
         if ($state === 1) {
             return $result;

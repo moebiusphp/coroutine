@@ -2,105 +2,161 @@
 namespace Moebius\Coroutine;
 
 use Moebius\Promise;
+use Moebius\Coroutine as Co;
 
+/**
+ * A Channel is a communications channel between coroutines. A coroutine
+ * that writes to a channel will block until a coroutine receives the
+ * message.
+ *
+ * There are two types of channels;
+ * - serializable channels and
+ * - single process channels.
+ *
+ * A serializable channel can be shared between different processes via
+ * a fifo file. It is possible to implement other backends for sending
+ * and receiving messages.
+ *
+ * When a coroutine tries to receive a message from a channel, that
+ * coroutine will block until a message becomes available. Messages 
+ * can only be received by a single coroutine.
+ *
+ * When a coroutine tries to write to a channel, that coroutine will
+ * block until a reader becomes available.
+ *
+ * If the channel is buffered, the message will be received immediately
+ * without blocking the sender - as long as the buffer is not full.
+ */
 class Channel extends Kernel {
 
     protected string $type;
     protected int $bufferSize;
-    protected array $pendingReaders = [];
-    protected array $pendingWriters = [];
-    protected array $bufferedWriters = [];
-    protected int $nextReaderId = 0;
-    protected int $nextWriterId = 0;
+    protected array $buffer = [];
+
+    // array of callbacks which will release a blocked reader
+    protected array $readers = [];
+
+    // array of callbacks which will release a blocked writer
+    protected array $writers = [];
 
     public function __construct(string $type, int $buffer=0) {
         /**
          * Validate that the type is serializable, so that we can support
          * channels communicating across processes.
          */
-        if (!$this->isValidType($type)) {
+        if (!$this->isSupportedType($type)) {
             throw new LogicException("Channels can only send messages that are serializable (scalar values or classes implementing the Serializable or JsonSerializable interfaces)");
         }
         if ($buffer < 0) {
-            throw new InvalidArgumentException("Argument 2 must be an integer >= 0");
+            throw new InvalidArgumentException("Buffer size can't be negative");
         }
         $this->type = $type;
-        $this->buffer = $buffer;
-        $this->canFill = new Promise();
-        $this->canFill->resolve();
-        $this->canDrain = new Promise();
+        $this->bufferSize = $buffer;
     }
 
     public function send(mixed $value): void {
-        if (!$this->isValidType($value)) {
-            throw new InvalidArgumentException("Channel only supports values of type ".$this->type.". Value of type ".get_debug_type($value)." provided.");
+        if (!$this->isSendable($value)) {
+            throw new InvalidArgumentException("The provided value is not sendable (type must be '".$this->type."')");
         }
 
-        if (count($this->pendingReaders) > 0) {
-            // we have a pending reader, so we take it
-            $reader = array_shift($this->pendingReaders);
-            $reader->resolve($value);
-            return;
-        } elseif (count($this->buffer) < $this->bufferSize) {
-            // we are allowed to buffer this write
-            $reader = new Promise();
-            $reader->resolve($value);
-            $this->buffer[] = $reader;
-            return;
-        } else {
-            // writing must block until we get a reader
-        }
-        $reader = array_shift($this->p
+        $message = serialize($value);
+        $value = null;
 
-        $this->buffer[$this->nextWriterId] = $promise = new Promise();
-
-        $this->writers[] = new Promise(function($write) use (&$value) {
-            $write($value);
-        });
-        while (!isset($this->buffer[$this->nextReaderId])) {
-            // we have no readers
-        if ($this->nextReaderId < $this->nextWriterId) {
-            $this->buffer[$this->
-        if ($this->nextWriterId - $this->nextReaderId >= $this->bufferSize) {
-
-        ]
+        $promise = new Promise();
+        $this->writers[] = function() use ($message, $promise) {
+            $promise->resolve(null);
+            return $message;
+        };
+        $this->process();
+        Co::await($promise);
     }
 
     public function receive(): mixed {
-        $this->awaitCanDrain();
-        $message = array_shift($this->buffer);
-        return array_shift($this->buffer);
-
+        $promise = new Promise();
+        $this->readers[] = function(string $message) use ($promise) {
+            $promise->resolve($message);
+        };
+        $this->process();
+        return unserialize(Co::await($promise));
     }
 
-    protected function awaitCanFill(): void {
-        while (count($this->buffer) < $this->bufferSize) {
-            do {
-                self::$promises->awaitThenable($this->canFill);
-            } while ($this->canFill->status() !== Promise::PENDING);
+    private function process(): void {
+        // fill the buffer to (number_of_readers + buffer_size) if possible
+        while (count($this->writers) > 0 && count($this->buffer) < (count($this->readers) + $this->bufferSize)) {
+            $writer = array_shift($this->writers);
+            $this->buffer[] = self::invoke($writer);
+        }
+
+        // empty the buffer until we have no more readers or no more buffer
+        while (count($this->buffer) > 0 && count($this->readers) > 0) {
+            $message = array_shift($this->buffer);
+            $reader = array_shift($this->readers);
+            self::invoke($reader, $message);
         }
     }
 
-    protected function awaitCanDrain(): void {
-        do {
-            self::$promises->awaitThenable($this->canDrain);
-        } while ($this->canFill->status() !== Promise::PENDING);
-    }
-
-    protected function isValidType(mixed $value): bool {
-        if (get_debug_type($value) !== $this->type) {
-            if (is_object($value) && class_exists($this->type)) {
-                $type = $this->type;
-                if ($value instanceof $type) {
-                    return true;
-                }
+    /**
+     * Check if a value is sendable via this channel
+     */
+    public function isSendable(mixed $value): bool {
+        // Arrays need special handling because they can
+        // contain anything
+        if ($this->type === 'array') {
+            if (!is_array($value)) {
+                return false;
             }
-            return false;
+
+            // Recursively check every member of the array
+            foreach ($value as $k => $v) {
+                if (is_scalar($v)) {
+                    continue;
+                }
+                if (is_object($v) && $v instanceof \Serializable) {
+                    continue;
+                }
+                if (is_array($v)) {
+                    if (!$this->isSendable($v)) {
+                        return false;
+                    }
+                    continue;
+                }
+                return false;
+            }
+            return true;
         }
-        return true;
+
+        // Ordinary type checking
+        $type = \get_debug_type($value);
+        if ($type === $this->type) {
+            return true;
+        }
+        if ($this->type === 'float' && is_int($value)) {
+            return true;
+        }
+        if ($this->type === 'int' && is_float($value) && $value == floor($value)) {
+            return true;
+        }
+        if (is_object($value) && class_exists($this->type) && $value instanceof $this->type) {
+            return true;
+        }
+
+        return false;
     }
 
-    protected static function isSerializableType(string $type): bool {
+    /**
+     * Unblock writers that were blocked by a full buffer
+     */
+    private function refillBuffer(): void {
+        while (count($this->writers) > 0 && count($this->buffer) < $this->bufferSize) {
+            $writer = array_shift($this->writers);
+            $this->buffer[] = self::invoke($writer);
+        }
+    }
+
+    /**
+     * Check if the type string is an allowed type for a channel.
+     */
+    protected function isSupportedType(string $type): bool {
         switch($type) {
             case "null" :
             case "bool" :
@@ -110,17 +166,16 @@ class Channel extends Kernel {
             case "array" :
                 return true;
 
-            default:
+            case "object" :
                 if (class_exists($type)) {
                     if (
-                        class_implements($type, \JsonSerializable::class) ||
                         class_implements($type, \Serializable::classs)
-                    } {
-                        return false;
+                    ) {
+                        return true;
                     }
-                    return true;
                 }
                 break;
+
         }
         return false;
     }

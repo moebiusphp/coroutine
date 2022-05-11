@@ -1,58 +1,72 @@
 <?php
 namespace Moebius\Coroutine;
 
+use Moebius\Coroutine as Co;
+use Moebius\Promise;
+
 final class WaitGroup extends Kernel {
 
     private int $value = 0;
     private array $waiting = [];
+    private Promise $promise;
 
-    public function add(int $delta): void {
-        $this->value += $delta;
-        if ($this->value <= 0) {
-            $this->value = 0;
-            $this->release();
-        }
+    public function __construct() {
+        $this->promise = new Promise();
     }
 
+    /**
+     * Add a number to the countdown. The total number
+     * added indicates how many times the WaitGroup::done()
+     * method has to be called to release waiting coroutines.
+     */
+    public function add(int $delta=1): void {
+        if (!$this->promise->isPending()) {
+            throw new LogicException("WaitGroup has been resolved");
+        }
+        if ($delta < 1) {
+            throw new LogicException("Expecting positive integer number");
+        }
+        $this->value += $delta;
+        $this->check();
+    }
+
+    /**
+     * Reduce the WaitGroup counter by one.
+     */
     public function done(): void {
-        if ($this->value === 0) {
-            throw new LogicException("Unexpected call to WaitGroup::done(). Use WaitGroup::add(1) to increase the number of permitted calls.");
+        if (!$this->promise->isPending()) {
+            // Ignoring if too many calls have been done, the WaitGroup
+            // may be used to wait for only the first few results.
+            return;
         }
         $this->value--;
-        if ($this->value <= 0) {
-            $this->value = 0;
-            $this->release();
-        }
+        $this->check();
     }
 
+    /**
+     * Throw an exception to any coroutines that are waiting for this
+     * WaitGroup to become resolved.
+     */
+    public function throw(\Throwable $e) {
+        if (!$this->promise->isPending()) {
+            throw new LogicException("WaitGroup has already been resolved");
+        }
+        $this->promise->reject($e);
+    }
+
+    /**
+     * Block until the WaitGroup counter goes down to zero.
+     */
     public function wait(): void {
-        if ($co = self::getCurrent()) {
-            /**
-             * Remove coroutine from loop, it will be reinserted when
-             * WaitGroup finishes.
-             */
-            $this->waiting[$co->id] = $co;
-            self::$coroutines->deactivate($co);
-            self::suspend();
-        } else {
-            /**
-             * We're in the global routine, so we'll let coroutines
-             * progress until the waitgroup resolves. If no coroutines
-             * are running, then the waitgroup can never be resolved.
-             */
-            while ($this->value > 0) {
-                self::suspend();
-                if (self::getActivityLevel() === 0) {
-                    throw new LogicException("Can't wait for this wait group when no coroutines are active");
-                }
-            }
-        }
+        Co::await($this->promise);
     }
 
-    private function release(): void {
-        foreach ($this->waiting as $id => $co) {
-            self::$coroutines->activate($co);
+    /**
+     * Check if the WaitGroup is resolved
+     */
+    private function check(): void {
+        if ($this->value <= 0) {
+            $this->promise->resolve(null);
         }
-        $this->waiting = [];
     }
 }

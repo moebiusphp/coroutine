@@ -24,7 +24,7 @@ use Fiber, SplMinHeap, Closure;
 /**
  * A Coroutine API for PHP, managing fibers efficiently and transparently.
  */
-final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmitterInterface {
+final class Coroutine extends Kernel implements StaticEventEmitterInterface {
     use StaticEventEmitterTrait;
     use PromiseTrait;
 
@@ -51,13 +51,7 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
         $co = new self($coroutine, $args);
 
         // swap in this coroutine temporarily and let it run one iteration
-        $current = self::$coroutines->current;
-        self::$coroutines->current = $co;
-
-        $co->stepSignal();
-
-        // swap back whatever previous coroutine (if any)
-        self::$coroutines->current = $current;
+        self::$coroutines->add($co);
 
         return $co;
     }
@@ -217,19 +211,18 @@ final class Coroutine extends Kernel implements PromiseInterface, StaticEventEmi
      */
     private function __construct(Closure $coroutine, array $args) {
         $this->id = self::$nextAvailableId++;
-echo "Creating coroutine ".$this->id."\n";
         $this->name = self::describeFunction($coroutine);
         self::$instanceCount++;
         $this->fiber = new Fiber($coroutine);
         $this->args = $args;
-        self::$coroutines->add($this);
+        $this->Promise();
     }
 
     /**
      * Run the coroutine for one iteration.
      */
     protected function stepSignal(): void {
-        assert(self::$coroutines->current === $this, "Mismatch between active coroutine when calling stepSignal()");
+        assert(self::$coroutines->getCurrentCoroutine() === $this, "Mismatch between active coroutine when calling stepSignal()");
         try {
             $this->startTimeNS = hrtime(true);
             if ($this->fiber->isSuspended()) {
@@ -263,12 +256,7 @@ echo "Creating coroutine ".$this->id."\n";
                 $this->fulfill($this->fiber->getReturn());
             }
         } catch (\Throwable $e) {
-            self::writeLog('[coroutine {id}] Coroutine threw {class}: {message} in {file}:{line}', [
-                'class' => get_class($e),
-                'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine()
-            ]);
+            self::logException($e);
 
             self::$coroutines->deactivate($this);
             $this->reject($e);
@@ -279,7 +267,6 @@ echo "Creating coroutine ".$this->id."\n";
      * The coroutine has terminated
      */
     public function __destruct() {
-        echo "Destructing ".$this->id."\n";
         self::$instanceCount--;
         if (self::$debug) {
             self::dumpStats();

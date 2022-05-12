@@ -1,0 +1,4 @@
+PHP stops querying the stream wrapper for EOF after the first time the stream wrapper
+returns EOF.
+
+It seems that calling fseek reenables the call to EOF.

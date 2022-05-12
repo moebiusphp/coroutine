@@ -40,12 +40,10 @@ class Promises extends KernelModule {
 
         $co = self::getCurrent();
 
-        if (self::$debug) {
-            if ($co) {
-                $this->log("Coroutine {id} awaiting promise", ['id' => $co->id]);
-            } else {
-                $this->log("Global routine awaiting promise");
-            }
+        if ($co) {
+            $this->logDebug("Coroutine {id} awaiting promise", ['id' => $co->id]);
+        } else {
+            $this->logDebug("Global routine awaiting promise");
         }
 
         /**
@@ -59,13 +57,13 @@ class Promises extends KernelModule {
             $state = 1;
             $result = $value;
             if ($co) {
-                self::$debug && $this->log("Coroutine {id} has promise fulfilled", ['id' => $co->id]);
+                $this->logDebug("Coroutine {id} has promise fulfilled", ['id' => $co->id]);
                 if ($coroutineDeactivated) {
                     --self::$moduleActivity[self::$name];
                     self::$coroutines->activate($co);
                 }
             } else {
-                self::$debug && $this->log("Global routine has promise fulfilled");
+                $this->logDebug("Global routine has promise fulfilled");
             }
         }, function($reason) use (&$state, &$result, $co, &$coroutineDeactivated) {
             if ($state !== 0) {
@@ -74,13 +72,13 @@ class Promises extends KernelModule {
             $state = 2;
             $result = $reason;
             if ($co) {
-                self::$debug && $this->log("Coroutine {id} has promise rejected", ['id' => $co->id]);
+                $this->logDebug("Coroutine {id} has promise rejected", ['id' => $co->id]);
                 if ($coroutineDeactivated) {
                     --self::$moduleActivity[self::$name];
                     self::$coroutines->activate($co);
                 }
             } else {
-                self::$debug && $this->log("Global routine {id} has promise rejected");
+                $this->logDebug("Global routine {id} has promise rejected");
             }
         });
 
@@ -109,18 +107,14 @@ class Promises extends KernelModule {
         }
     }
 
-    private function log(string $message, array $vars=[]): void {
-        self::writeLog('['.self::$name.'] '.$message, $vars);
-    }
-
     public function start(): void {
-        $this->log("Start");
+        $this->logDebug("Start");
         self::$moduleActivity[self::$name] = 0;
         $this->active = true;
     }
 
     public function stop(): void {
-        $this->log("Stop");
+        $this->logDebug("Stop");
         unset(self::$moduleActivity[self::$name]);
         $this->active = false;
     }

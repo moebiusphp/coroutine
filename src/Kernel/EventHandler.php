@@ -24,7 +24,7 @@ final class EventHandler extends Kernel {
 
     public function __destruct() {
         if ($this->status === 0) {
-            self::$debug && self::writeLog("[EventHandler {id}] Garbage collected while pending", ['id' => $this->id]);
+            self::logWarning("[EventHandler {id}] Garbage collected while pending", ['id' => $this->id]);
         }
     }
 

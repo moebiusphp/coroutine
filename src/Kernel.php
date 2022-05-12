@@ -26,10 +26,30 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
     use StaticEventEmitterTrait;
     use PromiseTrait;
 
+    /**
+     * Handling of active coroutines
+     */
     protected static Kernel\Coroutines $coroutines;
+
+    /**
+     * Holds deactivated coroutines until an IO event occurs
+     */
     protected static Kernel\IO $io;
+
+    /**
+     * Holds deactivated coroutines until a promise is resolved
+     */
     protected static Kernel\Promises $promises;
+
+    /**
+     * Holds deactivated coroutines until a timer expires
+     */
     protected static Kernel\Timers $timers;
+
+    /**
+     * Holds deactivated coroutines until there is no more work
+     * to do and application would terminate.
+     */
     protected static Kernel\Zombies $zombies;
 
     /**
@@ -44,6 +64,19 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
      */
     public static function getRealTime(): float {
         return (hrtime(true) - self::$hrStartTime) / 1000000000;
+    }
+
+    /**
+     * Set the max time delay before the next tick should be started. This is intended
+     * for use by timers and other events so that we avoid running the loop at full CPU
+     * speed.
+     */
+    public static function setMaxDelay(float $seconds): void {
+        self::$nextTickTime = min(self::$nextTickTime, self::$currentTime + $seconds);
+    }
+
+    public static function getMaxDelay(): float {
+        return max(0, self::$nextTickTime - self::getRealTime());
     }
 
     /**
@@ -88,6 +121,12 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
      * Tracks the start time for the loop
      */
     protected static int $hrStartTime = 0;
+
+    /**
+     * Time when the next tick must begin. Modules should update this after
+     * their tick. It will be reset to default when the tick begins.
+     */
+    private static float $nextTickTime = 0;
 
     /**
      * Configurable time window for interrupting coroutines in
@@ -136,18 +175,11 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
     protected static bool $running = false;
 
     /**
-     * Fibers that are waiting for a stream resource to become readable.
-     *
-     * @type array<int, resource>
+     * Hooks for sleeping (e.g. run stream_select() or similar). The remaining sleep time
+     * will be divided between all sleep functions and is given as a float with a number
+     * of seconds.
      */
-    protected static array $readableStreams = [];
-
-    /**
-     * Fibers that are waiting for a stream resource to become writable.
-     *
-     * @type array<int, resource>
-     */
-    protected static array $writableStreams = [];
+    protected static array $hookSleepFunctions = [];
 
     /**
      * Hook for events that must run before the main tick functions.
@@ -169,6 +201,11 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
      * @var array<string, \Closure>
      */
     protected static array $hookAfterTick = [];
+
+    /**
+     * Closures that should run as soon as possible after the cycle
+     */
+    protected static array $deferred = [];
 
     /**
      * Hook for events that run after the PHP application terminates
@@ -204,6 +241,7 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
      * of a coroutine, run coroutines for a number of seconds.
      *
      * @param float $seconds Number of seconds to sleep
+     * @throws InterruptedException if something instructs the loop to terminate
      */
     protected static function sleep(float $seconds): void {
         if ($co = self::getCurrent()) {
@@ -211,9 +249,21 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
             self::suspend();
         } else {
             $expires = self::getRealTime() + $seconds;
-            self::runLoop(function() use ($expires) {
-                return self::getTime() < $expires;
-            });
+            continue_sleeping:
+            try {
+                self::runLoop(function() use ($expires) {
+                    self::setMaxDelay($expires - self::getRealTime());
+                    return self::getTime() < $expires;
+                });
+            } catch (InterruptedException $e) {
+                if ($e->getCode() === 2) {
+                    // the loop stopped because no other activity is going on
+                    // but we should continue to sleep
+                    goto continue_sleeping;
+                }
+                self::logException($e);
+                throw $e;
+            }
         }
     }
 
@@ -223,7 +273,15 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
      */
     protected static function suspend(): void {
         if (Fiber::getCurrent() === null) {
-            self::tick();
+            if (self::$running) {
+                // this normally is caused features that automatically call suspend via destructors
+                // or stream wrappers
+                self::logDebug("The loop is running, and suspend was called from outside a fiber");
+                return;
+            }
+            self::runLoop(function() {
+                return false;
+            });
         } elseif (self::getCurrent()) {
             Fiber::suspend();
         } else {
@@ -232,115 +290,161 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
     }
 
     /**
-     * Run the event loop until the provided callback returns false. If self::$running gets set to
-     * false, throw an exception.
+     * Run the event loop until the provided callback returns false. Generally
+     * it is preferable to use Co::await() to run the event loop until a promise is
+     * resolved.
+     *
+     * WARNING!
+     * --------
+     * DO NOT RUN EXTERNAL LOGIC INSIDE THE RESUME FUNCTION, INSTEAD SPAWN A
+     * COROUTINE BEFORE RUNNING THE LOOP. LOGIC INSIDE THE RESUME FUNCTION MUST
+     * HANDLE SPECIAL SCENARIOS.
+     *
+     * @throws InterruptedException if the $resumeFunction wants to continue, but the
+     *                              event loop has no activity or was stopped by some other.
+     *                              request.
      *
      * @param callable $resumeFunction
      */
-    protected static function runLoop(callable $resumeFunction): void {
+    protected static function runLoop(callable $resumeFunction=null): void {
         if (self::getCurrent()) {
             throw new InternalLogicException("Can't call Kernel::runLoop() from within a coroutine");
         }
         if (self::$running) {
             throw new InternalLogicException("Loop is already running");
         }
+
+        /**
+         * Run one tick iteration including sleeping and stuff. This is a closure
+         * because we don't want it to be invoked by anything except runLoop()
+         */
+        $tick = function() {
+            if (self::$debug) {
+                self::dumpStats();
+            }
+
+            $currentTime = self::getRealTime();
+            $maxDelay = self::getMaxDelay();
+
+            if (count(self::$hookSleepFunctions) > 0) {
+                $delay = $maxDelay / count(self::$hookSleepFunctions);
+                foreach (self::$hookSleepFunctions as $sleepFunction) {
+                    $startTime = self::getRealTime();
+                    self::invoke($sleepFunction, $delay);
+                    $timeSpent = self::getRealTime() - $startTime;
+                    $delay = min($timeSpent, $delay);
+                }
+            } else {
+                usleep(floor($maxDelay * 1000000));
+            }
+
+            self::$currentTime = self::getRealTime();
+            self::$nextTickTime = $currentTime + 2.0;
+
+            /**
+             * @see self::$hookBeforeTick
+             */
+            foreach (self::$hookBeforeTick as $handler) {
+                self::invoke($handler);
+            }
+
+            /**
+             * @see self::$hookTick
+             */
+            foreach (self::$hookTick as $handler) {
+                self::invoke($handler);
+            }
+
+            /**
+             * @see self::$hookAfterTick
+             */
+            foreach (self::$hookAfterTick as $handler) {
+                self::invoke($handler);
+            }
+
+            /**
+             * @see self::$deferred
+             */
+            if (self::$deferred !== []) {
+                $deferred = self::$deferred;
+                self::$deferred = [];
+                foreach ($deferred as $callback) {
+                    self::invoke($callback);
+                }
+            }
+
+            self::$tickCount++;
+        };
+
         self::$running = true;
+        $loggedActivityLevelWarning = false;
         for (;;) {
-            if (!$resumeFunction()) {
+            $tick();
+
+            if (null !== $resumeFunction && !$resumeFunction()) {
+                /**
+                 * The $resumeFunction wants the loop to stop for now
+                 */
                 self::$running = false;
+                return;
+            }
+
+            if (self::$running === false) {
+                /**
+                 * Something has instructed Moebius to stop
+                 */
+                if (null !== $resumeFunction) {
+                    throw new InterruptedException("Moebius was instructed to stop", 1);
+                }
                 return;
             }
 
             if (0 === self::getActivityLevel()) {
+                /**
+                 * The loop has no work to do, so we stop the loop
+                 */
                 self::$running = false;
+                if (null !== $resumeFunction) {
+                    throw new InterruptedException("Coroutine has no work to do", 2);
+                }
                 return;
             }
-
-            if (!self::$running) {
-                self::$running = false;
-                throw new InterruptedException("Moebius\Coroutine::stop() was called");
-            }
-
-            self::tick();
         }
-    }
-
-    /**
-     * Resolve scheduled timers and readable/writable stream resources then run
-     * the coroutines
-     *
-     * @param bool $maySleep    If false, do not sleep.
-     * @return int              The number of unfinished coroutines that are being managed
-     */
-    private static function tick(): int {
-        if (self::$debug) {
-            self::dumpStats(false);
-        }
-        if (Fiber::getCurrent()) {
-            throw new InternalLogicException("Can't run Coroutine::tick() from within a Fiber. This is a bug.");
-        }
-
-        self::$currentTime = (hrtime(true) - self::$hrStartTime) / 1000000000;
-
-        /**
-         * @see self::$hookBeforeTick
-         */
-        foreach (self::$hookBeforeTick as $handler) {
-            $handler();
-        }
-
-        /**
-         * @see self::$hookTick
-         */
-        foreach (self::$hookTick as $handler) {
-            $handler();
-        }
-
-        /**
-         * @see self::$hookAfterTick
-         */
-        foreach (self::$hookAfterTick as $handler) {
-            $handler();
-        }
-
-        self::$tickCount++;
-
-        return self::getActivityLevel();
     }
 
     /**
      * Returns the total number of managed coroutines and callbacks
      */
     protected static function getActivityLevel(): int {
-        return array_sum(self::$moduleActivity);
+        return array_sum(self::$moduleActivity) + count(self::$deferred);
     }
 
     /**
-     * Run all coroutines until there are no more coroutines to run.
+     * When the application would normally stop, this function is invoked to run
+     * the event loop until it is empty.
      */
     protected static function onAppTerminate(): void {
         // Don't run if we're coming from a fatal error (uncaught exception).
         $error = error_get_last();
         if ((isset($error['type']) ? $error['type'] : 0) & (E_ERROR | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR | E_RECOVERABLE_ERROR)) {
-            self::writeLog('[core] Termination error {type}: {message} in {file}:{line}', $error);
+            self::logError('[core] Termination error {type}: {message} in {file}:{line}', $error);
             return;
         }
 
-        foreach (self::$hookAppTerminate as $k => $hook) {
-            $hook();
-        }
-
+        // Don't run if we're coming from a coroutine that killed the application
         if (self::$coroutines->getCurrent()) {
             // This happens whenever a die() or exit() or a fatal error
             // occurred inside a coroutine.
+            self::logException(new CoroutineException("Coroutine caused the application to stop (by calling die() or stop() or causing a fatal error)"));
             self::cleanup();
             return;
         }
 
+        foreach (self::$hookAppTerminate as $k => $hook) {
+            self::invoke($hook);
+        }
 
-        self::runLoop(function() {
-            return true;
-        });
+        self::runLoop();
 
         self::cleanup();
         return;
@@ -356,37 +460,14 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
             "Fiber and coroutine ".json_encode(self::$coroutines->getCurrentCoroutine()?->id)." mismatch"
         );
         return self::$coroutines->getCurrentCoroutine();
-
-        $fiber = Fuber::getCurrent();
-        if ($fiber === null) {
-            return null;
-        }
-        $current = self::$coroutines->current;
-        if ($fiber === null) {
-            return null;
-        }
-        assert($current === $fiber);
-        $fiber = Fiber::getCurrent();
-        if ($fiber === null && $current === null) {
-            return null;
-        }
-        if ($current && $current->fiber === $fiber) {
-            return $current;
-        }
-        if ($current === null) {
-            throw new UnknownFiberException("There is no current coroutine, but we are running inside a fiber");
-        }
-        if ($fiber === null) {
-            throw new UnknownFiberException("There is no current fiber, but a coroutine is marked as active");
-        }
-        throw new UnknownFiberException("The current fiber does not match the current coroutine");
     }
 
     protected static function invoke(\Closure $callable, mixed ...$args): mixed {
         try {
             return $callable(...$args);
         } catch (\Throwable $e) {
-            self::writeLogException($e);
+            self::logException($e);
+            throw $e;
         }
     }
 
@@ -402,10 +483,11 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
         if (getenv('DEBUG')) {
             self::$debug = true;
             // enable zend assertions if possible
-            if (ini_get('zend.assertions') != '-1') {
+            $ini = ini_get('zend.assertions');
+            if ($ini == '0' || $ini == '1') {
                 ini_set('zend.assertions', 1);
             } else {
-                self::writeLog('[core] Debug enabled: Unable to enable assertions. Use the PHP command line option -d zend.assertions=0 to enable.');
+                self::logDebug('[core] Unable to enable assertions. Use the PHP command line option -d zend.assertions=0 to enable.');
             }
         }
 
@@ -442,12 +524,28 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
         }
     }
 
-    protected static function writeLog(string $message, array $vars=[]): void {
-        self::$debug && fwrite(STDERR, gmdate('Y-m-d H:i:s').' '.self::interpolateString(trim($message), $vars)."\n");
+    protected static function writeLog(string $level, string $message, array $vars=[]): void {
+        fwrite(STDERR, gmdate('Y-m-d H:i:s').' '.$level.' '.self::interpolateString(trim($message), $vars)."\n");
+    }
+
+    protected static function logInfo(string $message, array $vars=[]): void {
+        self::writeLog('info', $message, $vars);
+    }
+
+    protected static function logDebug(string $message, array $vars=[]): void {
+        self::$debug && self::writeLog('debug', $message, $vars);
+    }
+
+    protected static function logWarning(string $message, array $vars=[]): void {
+        self::writeLog('warn', $message, $vars);
+    }
+
+    protected static function logError(string $message, array $vars=[]): void {
+        self::writeLog('error', $message, $vars);
     }
 
     protected static function logException(\Throwable $e) {
-        self::writeLog("[kernel] {class}: {message} in {file}:{line}. Trace:\n{trace}", [
+        self::logError("{class}: {message} in {file}:{line}. Trace:\n{trace}", [
             'class' => get_class($e),
             'message' => $e->getMessage(),
             'file' => $e->getFile(),
@@ -467,7 +565,9 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
         foreach (self::$moduleActivity as $k => $v) {
             $extra[] = "$k=$v";
         }
-        fwrite(STDERR, "co: tick=".self::$tickCount." tot=".self::$instanceCount." read=".count(self::$readableStreams)." write=".count(self::$readableStreams)." ".implode(" ", $extra).($nl ? "\n" : "\r"));
+        $activityLevel = self::getActivityLevel();
+        $sleepTime = floor(max(0, self::$nextTickTime - self::getRealTime()) * 1000);
+        fwrite(STDERR, "co: tick=".self::$tickCount." sleepTime=".$sleepTime."ms active/total=$activityLevel/".self::$instanceCount." ".implode(" ", $extra).($nl ? "\n" : "\r"));
     }
 
     protected static function describeFunction(callable $callable): string {

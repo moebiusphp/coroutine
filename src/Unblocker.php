@@ -11,6 +11,7 @@ use Moebius\Coroutine as Co;
 class Unblocker {
 
     public $context;
+    public $resource;
 
     protected int $id;
     protected $fp;
@@ -23,16 +24,18 @@ class Unblocker {
     protected static $resources = [];
     protected static $results = [];
 
-    protected static $registered = false;
+    /**
+     * A tick number where we will not suspend, since we just came back from our own suspend
+     */
+    protected static $noSuspend = null;
 
-    private static int $lastSuspend = 0;
+    protected static $registered = false;
 
     /**
      * Check if the provided resource is an unblocked proxy stream, or if
      * it is a raw stream resource.
      */
     public static function isUnblocked($resource): bool {
-        self::interrupt();
         if (!is_resource($resource)) {
             throw new \InvalidArgumentException("Expected a stream resource, got ".get_debug_type($resource));
         }
@@ -53,10 +56,12 @@ class Unblocker {
 
         self::register(); // $meta['uri'] ? STREAM_IS_URL : 0);
 
+//        stream_set_read_buffer($resource, 0);
         $meta = stream_get_meta_data($resource);
         self::$resources[$id] = $resource;
         $result = fopen('moebius-unblocker://'.$id, $meta['mode']);
         self::$results[$id] = $result;
+
         return $result;
     }
 
@@ -86,7 +91,7 @@ class Unblocker {
         $this->mode = $mode;
         $this->options = $options;
         stream_set_blocking($this->fp, false);
-        self::suspend();
+        Co::suspend();
         return true;
     }
 
@@ -94,16 +99,29 @@ class Unblocker {
         fclose($this->fp);
         unset(self::$resources[$this->id]);
         unset(self::$results[$this->id]);
-        self::suspend();
+        Co::suspend();
     }
 
     public function stream_eof(): bool {
-        self::singleSuspend();
-        return feof($this->fp);
+        Co::suspend();
+        $res = feof($this->fp);
+
+        if ($res) {
+            /**
+             * Handle a bug or annoying "feature" where PHP caches forever a positive EOF
+             */
+            Co::defer(function() {
+                if (isset(self::$results[$this->id])) {
+                    fseek(self::$results[$this->id], 0, \SEEK_CUR);
+                }
+            });
+        }
+
+        return $res;
     }
 
     public function stream_flush(): bool {
-        self::singleSuspend();
+        Co::suspend();
         return fflush($this->fp);
     }
 
@@ -111,12 +129,14 @@ class Unblocker {
         $blocking = !($operation & LOCK_NB);
         while (is_resource($this->fp) && !flock($this->fp, $operation | LOCK_NB, $wouldBlock)) {
             if (!$blocking || !$wouldBlock) {
-                self::suspend();
+                Co::suspend();
                 return false;
             }
-            self::suspend();
+            Co::suspend();
+            // prevent an immediate new suspend
+            self::$noSuspend = Co::getTickCount();
         }
-        self::singleSuspend();
+        Co::suspend();
         if (!is_resource($this->fp)) {
             trigger_error("Stream resource is invalid", E_USER_ERROR);
             return false;
@@ -139,12 +159,13 @@ class Unblocker {
     }
 
     public function stream_seek(int $offset, int $whence = SEEK_SET): bool {
-        self::singleSuspend();
-        return fseek($this->fp, $whence);
+        Co::suspend();
+        fseek($this->fp, $offset, $whence);
+        return true;
     }
 
     public function stream_set_option(int $option, int $arg1=null, int $arg2=null): bool {
-        self::singleSuspend();
+        Co::suspend();
         switch ($option) {
             case STREAM_OPTION_BLOCKING:
                 // The method was called in response to stream_set_blocking()
@@ -177,17 +198,17 @@ class Unblocker {
     }
 
     public function stream_stat(): array|false {
-        self::singleSuspend();
+        Co::suspend();
         return fstat($this->fp);
     }
 
     public function stream_tell(): int {
-        self::singleSuspend();
+        Co::suspend();
         return ftell($this->fp);
     }
 
     public function stream_truncate(int $new_size): bool {
-        self::singleSuspend();
+        Co::suspend();
         return ftruncate($this->fp, $new_size);
     }
 
@@ -205,36 +226,11 @@ class Unblocker {
         return fwrite($this->fp, $data);
     }
 
-    protected static function interrupt(): void {
-        static $counter = 0;
-        if (20 === $counter++) {
-            $counter = 0;
-            Co::interrupt();
-        }
-    }
-
-    protected static function suspend(): void {
-        self::$lastSuspend = Co::getTickCount();
-        Co::suspend();
-    }
-
     protected static function readable(mixed $stream, float $timeout=null): bool {
-        self::$lastSuspend = Co::getTickCount();
         return Co::readable($stream, $timeout);
     }
 
     protected static function writable(mixed $stream, float $timeout=null): bool {
-        self::$lastSuspend = Co::getTickCount();
         return Co::writable($stream, $timeout);
-    }
-
-    /**
-     * Avoid suspending twice within the time span of 1 millisecond
-     */
-    protected static function singleSuspend(): void {
-        if (self::$lastSuspend === Co::getTickCount() - 1) {
-            return;
-        }
-        self::suspend();
     }
 }

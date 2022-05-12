@@ -1,8 +1,64 @@
 moebius/coroutine
 =================
 
-True "green threads" (coroutines) for PHP 8.1. No plugins needed. Bringing the concurrency
-style of Go to PHP.
+True "green threads" (coroutines) for PHP 8.1. No plugins needed. Coroutines are like multitasking,
+but without many of the subtle problems that come from threads.
+
+
+## Examples
+
+Monitor multiple files for appended lines, and emit events whenever content is appended.
+
+examples/monitor-files.php
+```
+<?php
+    require "vendor/autoload.php";
+
+    use Moebius\Coroutine as Co;
+    use Evenement\EventEmitter;
+
+    $emitter = new EventEmitter();
+
+    // Launch the watchers
+    Co::go(watch_file('/var/log/nginx/access.log', $emitter, 'access'));
+    Co::go(watch_file('/var/log/nginx/error.log', $emitter, 'error'));
+    Co::go(watch_file('/var/log/fail2ban.log', $emitter, 'fail2ban'));
+
+    // Listen for events
+    $emitter->on('access', function($line) {
+        echo "access:   $line\n";
+    });
+    $emitter->on('error', function($line) {
+        echo "error:    $line\n";
+    });
+    $emitter->on('fail2ban', function($line) {
+        echo "fail2ban: $line\n";
+    });
+
+    /**
+     * Watch function which will monitor files for added lines
+     */
+    function watch_file(string $filename, EventEmitter $emitter, string $event) {
+        // Open the file like you normally would
+        $fp = fopen("some-file.txt", "r");
+
+        // Make the file resource $fp coroutine friendly
+        $fp = Co::unblock($fp);
+
+        // Read lines from the file
+        while (!feof($fp)) {
+            $line = fgets($line, 4096);
+            $emitter->emit($event, trim($line));
+        }
+    }
+
+
+
+```
+
+
+
+
 
 Deceptivly simple API:
 

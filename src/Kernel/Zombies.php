@@ -27,7 +27,7 @@ class Zombies extends KernelModule {
 
     public function bury(Coroutine $co): void {
         assert(!isset($this->active[$co->id]), "Coroutine is already a zombie");
-        self::$debug && $this->log("Burying coroutine {id}", ['id' => $co->id]);
+        $this->logDebug("Burying coroutine {id}", ['id' => $co->id]);
         self::$coroutines->deactivate($co);
         $this->active[$co->id] = $co;
 
@@ -35,18 +35,22 @@ class Zombies extends KernelModule {
 
     public function unbury(Coroutine $co): void {
         assert(isset($this->active[$co->id]), "Coroutine is not buried");
-        self::$debug && $this->log("Unburying coroutine {id}", ['id' => $co->id]);
+        $this->logDebug("Unburying coroutine {id}", ['id' => $co->id]);
         unset($this->active[$co->id]);
         self::$coroutines->activate($co);
     }
 
     public function revive(Coroutine $co): void {
         assert(isset($this->active[$co->id]), "Coroutine is not zombified");
-        self::$debug && $this->log("Reviving coroutine {id}", ['id' => $co->id]);
+        $this->logDebug("Reviving coroutine {id}", ['id' => $co->id]);
         unset($this->active[$co->id]);
         self::$coroutines->activate($co);
     }
 
+    /**
+     * If there is no activity going on after the loop,
+     * we'll revive all zombie coroutines.
+     */
     private function onAfterTick() {
         if ($this->active === []) {
             return;
@@ -64,17 +68,13 @@ class Zombies extends KernelModule {
         $this->active = [];
     }
 
-    private function log(string $message, array $vars=[]): void {
-        self::writeLog('['.self::$name.'] '.$message, $vars);
-    }
-
     public function start(): void {
-        $this->log("Start");
+        $this->logDebug("Start");
         self::$hookAfterTick[self::$name] = $this->onAfterTick(...);
     }
 
     public function stop(): void {
-        $this->log("Stop");
+        $this->logDebug("Stop");
         unset(self::$hookAfterTick[self::$name]);
     }
 

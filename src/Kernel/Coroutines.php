@@ -24,10 +24,6 @@ class Coroutines extends KernelModule {
      */
     private array $microTasks = [];
 
-    private function log(string $message, array $vars=[]): void {
-        self::writeLog('['.self::$name.'] '.$message, $vars);
-    }
-
     public function getCurrentCoroutine(): ?Coroutine {
         return $this->current;
     }
@@ -40,7 +36,6 @@ class Coroutines extends KernelModule {
     public function activate(Coroutine $co): void {
         assert(!$co->fiber->isTerminated(), "Terminated coroutine can't be activated");
         assert(isset($this->added[$co]), "activate: Coroutine is not added to kernel");
-        self::$debug && $this->log("Activated coroutine {id}", ['id' => $co->id]);
         if (isset($this->active[$co->id])) {
             throw new InternalLogicException("Coroutine is already activated");
         }
@@ -50,7 +45,6 @@ class Coroutines extends KernelModule {
 
     public function deactivate(Coroutine $co): void {
         assert(isset($this->added[$co]), "Coroutine is not added to kernel");
-        self::$debug && $this->log("Deactivated coroutine {id}", ['id' => $co->id]);
         if (!isset($this->active[$co->id])) {
             throw new InternalLogicException("Coroutine is already deactivated");
         }
@@ -62,13 +56,13 @@ class Coroutines extends KernelModule {
      * Whenever coroutines are terminated this function must be called.
      */
     public function terminated(Coroutine $co): void {
-        if (!$co->fiber->isTerminated()) {
-            $this->log("Coroutine {id} was marked as terminated without being terminated");
-        }
-        self::$debug && $this->log("Coroutine {id} has been terminated", ['id' => $co->id]);
         if (!isset($this->active[$co->id])) {
             throw new InternalLogicException("Coroutine ".$co->id." is not active");
         }
+        if (!$co->fiber->isTerminated()) {
+            $this->logWarning("Coroutine {id} is being terminated without having completed");
+        }
+        self::$debug && $this->logDebug("Coroutine {id} has been terminated", ['id' => $co->id]);
         unset($this->active[$co->id]);
         --self::$moduleActivity[self::$name];
         unset($this->added[$co]);
@@ -76,7 +70,7 @@ class Coroutines extends KernelModule {
 
     public function add(Coroutine $co): void {
         assert(!isset($this->added[$co]), "Coroutine was already added to kernel");
-        self::$debug && $this->log("Added coroutine {id}", ['id' => $co->id]);
+        self::$debug && $this->logDebug("Added coroutine {id}", ['id' => $co->id]);
         $this->added[$co] = true;
         $this->active[$co->id] = $co;
         ++self::$moduleActivity[self::$name];
@@ -98,20 +92,18 @@ class Coroutines extends KernelModule {
             $this->runMicroTasks();
         }
         $this->current = null;
+        if ($this->active !== []) {
+            self::setMaxDelay(0);
+        }
     }
 
     private function runMicroTasks(): void {
         foreach ($this->microTasks as $k => $task) {
             try {
-                $this->log("Running microtask {key} for coroutine {id}", ['key' => $k, 'id' => $co->id]);
+                $this->logDebug("Running microtask {key} for coroutine {id}", ['key' => $k, 'id' => $co->id]);
                 $task();
             } catch (\Throwable $e) {
-                $this->log("Coroutine {id} micro-task threw {class}: {message} in {file}:{line}", [
-                    'class' => get_class($e),
-                    'message' => $e->getMessage(),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine()
-                ]);
+                $this->logException($e);
             }
         }
         $this->microTasks = [];
@@ -121,13 +113,13 @@ class Coroutines extends KernelModule {
         $this->added = new WeakMap();
         self::$moduleActivity[self::$name] = 0;
         self::$hookTick[self::$name] = $this->tick(...);
-        $this->log("Start");
+        $this->logDebug("Start");
     }
 
     public function stop(): void {
         unset(self::$moduleActivity[self::$name]);
         unset(self::$hookTick[self::$name]);
-        $this->log("Stop");
+        $this->logDebug("Stop");
     }
 
 }

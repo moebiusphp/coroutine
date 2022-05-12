@@ -10,7 +10,8 @@
         "moebius/async-file": "Automatically and transparently makes blocking file system operations non-blocking"
     },
     "require-dev": {
-        "charm/testing": ">=0"
+        "charm/testing": ">=0",
+        "evenement/evenement": "^3.0"
     },
     "license": "MIT",
     "autoload": {

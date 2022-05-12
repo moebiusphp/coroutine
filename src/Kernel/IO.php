@@ -21,10 +21,6 @@ class IO extends KernelModule {
     private array $handlers = [];
     private array $resources = [];
 
-    private function log(string $message, array $vars=[]): void {
-        self::writeLog('['.self::$name.'] '.$message, $vars);
-    }
-
     private function watch($resource, int $eventType, Closure|Coroutine $c, float $seconds=null): EventHandler {
         if (!is_resource($resource)) {
             throw new InvalidArgumentException("Argument 1 expects a stream resource");
@@ -40,7 +36,7 @@ class IO extends KernelModule {
 
         $handler = new EventHandler($c, $seconds, $eventType);
 
-        self::$debug && $this->log("Watcher {watcherId} on resource {id} for event type {eventType} with timeout {seconds} seconds", ['watcherId' => $handler->id, 'id' => get_resource_id($resource), 'eventType' => $eventType, 'seconds' => $seconds ?? 'NULL']);
+        $this->logDebug("Watcher {watcherId} on resource {id} for event type {eventType} with timeout {seconds} seconds", ['watcherId' => $handler->id, 'id' => get_resource_id($resource), 'eventType' => $eventType, 'seconds' => $seconds ?? 'NULL']);
 
         if ($seconds !== null) {
             self::$timers->schedule($this->cancel(...), $seconds, $handler->id);
@@ -81,7 +77,7 @@ class IO extends KernelModule {
         if (!isset($this->handlers[$id])) {
             return;
         }
-        self::$debug && $this->log("Cancelling IO watcher {id}", ['id' => $id]);
+        $this->logDebug("Cancelling IO watcher {id}", ['id' => $id]);
         if ($this->handlers[$id]->value instanceof Coroutine) {
             self::$coroutines->activate($this->handlers[$id]->value);
         }
@@ -91,32 +87,17 @@ class IO extends KernelModule {
         --self::$moduleActivity[self::$name];
     }
 
-    private function onBeforeTick() {
-        if ($this->handlers === []) {
-            return;
-        }
-
-        /**
-         * What is the optimal sleep time for the stream_select() call?
-         */
-        if (self::$moduleActivity['core.coroutines'] !== 0) {
-            // there are coroutines that are not blocked, so no sleeping
-            $sleepTime = 0;
-        } elseif (self::$moduleActivity['core.timers'] !== 0) {
-            // there are pending timers
-            $sleepTime = (self::$timers->getNextEventTime() - self::getRealTime()) - 0.001;
-            if ($sleepTime < 0) {
-                $sleepTime = 0;
+    private function onAfterTick() {
+        if (isset(self::$hookSleepFunctions[self::$name]) || $this->handlers !== []) {
+            if ($this->handlers === []) {
+                unset(self::$hookSleepFunctions[self::$name]);
+            } else {
+                self::$hookSleepFunctions[self::$name] = $this->performStreamSelect(...);
             }
-        } else {
-            // we are only waiting for IO, so we can sleep long long time
-            $sleepTime = 0.125;
         }
-
-        $this->performStreamSelect($sleepTime);
     }
 
-    private function performStreamSelect(float $sleepTime): void {
+    private function performStreamSelect(float $seconds): void {
         $readableStreams = [];
         $writableStreams = [];
         $exceptionStreams = [];
@@ -138,11 +119,11 @@ class IO extends KernelModule {
             }
         }
 
-//$this->log("Stream select readable={rc} writable={wc} exceptions={ec}", ['rc' => count($readableStreams), 'wc' => count($writableStreams), 'ec' => count($exceptionStreams) ]);
-
-        $count = @stream_select($readableStreams, $writableStreams, $exceptionStreams, floor($sleepTime), ($sleepTime - floor($sleepTime)) * 1000000);
+        $sec = floor($seconds);
+        $usec = (1000000 * ($seconds - $sec)) | 0;
+        $count = @stream_select($readableStreams, $writableStreams, $exceptionStreams, $sec, $usec);
         if ($count === false) {
-            $this->log("stream_select() failed, possibly because of a signal");
+            $this->logWarning("stream_select() failed, possibly because of a signal");
             return;
         }
         if ($count === 0) {
@@ -154,12 +135,6 @@ class IO extends KernelModule {
          * check that a resource is actually readable. Not sure if it helps, but it is very
          * cheap to do - so here goes.
          */
-/*
-        $count2 = @stream_select($readableStreams, $writableStreams, $exceptionStreams, 0, 0);
-        if ($count2 === false || $count2 === 0) {
-            return;
-        }
-*/
 
         $readableIds = array_map(get_resource_id(...), $readableStreams);
         $writableIds = array_map(get_resource_id(...), $writableStreams);
@@ -173,7 +148,7 @@ class IO extends KernelModule {
                 (0 !== ($handler->extra & self::WRITABLE) && in_array($resourceId, $writableIds, true)) ||
                 (0 !== ($handler->extra & self::EXCEPTION) && in_array($resourceId, $exceptionIds, true))
             ) {
-                self::$debug && $this->log("Activating watcher {id}", ['id' => $handler->id]);
+                $this->logDebug("Activating watcher {id}", ['id' => $handler->id]);
                 unset($this->handlers[$handler->id]);
                 unset($this->resources[$handler->id]);
                 if ($handler->value instanceof Coroutine) {
@@ -188,17 +163,18 @@ class IO extends KernelModule {
     }
 
     public function start(): void {
-        $this->log("Start");
+        $this->logDebug("Start");
         self::$moduleActivity[self::$name] = 0;
-        self::$hookBeforeTick[self::$name] = $this->onBeforeTick(...);
+        self::$hookAfterTick[self::$name] = $this->onAfterTick(...);
         $this->readable = [];
         $this->writable = [];
     }
 
     public function stop(): void {
-        $this->log("Stop");
+        $this->logDebug("Stop");
         unset(self::$moduleActivity[self::$name]);
-        unset(self::$hookBeforeTick[self::$name]);
+        unset(self::$hookAfterTick[self::$name]);
+        unset(self::$hookSleepFunctions[self::$name]);
         $this->readable = [];
         $this->writable = [];
     }

@@ -19,7 +19,7 @@ use Moebius\Promise\{
     PromiseInterface,
     PromiseTrait
 };
-use Fiber, SplMinHeap, Closure;
+use Fiber, SplMinHeap, Closure, TypeError;
 
 /**
  * A Coroutine API for PHP, managing fibers efficiently and transparently.
@@ -31,23 +31,29 @@ final class Coroutine extends Kernel implements StaticEventEmitterInterface {
     /**
      * Run a coroutine and wait for it to return or throw an exception.
      *
-     * @param Closure $coroutine    The function to run
+     * @param callable $coroutine    The function to run
      * @param mixed ...$args        Arguments to pass to the function
      * @return mixed                The value returned from the coroutine
      * @throws \Throwable           Any exception thrown by the coroutine
      */
-    public static function run(Closure $coroutine, mixed ...$args): mixed {
+    public static function run(callable $coroutine, mixed ...$args): mixed {
         return self::await(self::go($coroutine, ...$args));
     }
 
     /**
      * Run a coroutine in parallel. Returns a Coroutine object.
      *
-     * @param Closure $coroutine    The function to run
+     * @param callable $coroutine    The function to run
      * @param mixed ...$args        Arguments to pass to the function
      * @return Coroutine            A coroutine
      */
-    public static function go(Closure $coroutine, mixed ...$args): Coroutine {
+    public static function go(callable $coroutine, mixed ...$args): Coroutine {
+/*
+        if (!is_callable($coroutine)) {
+            throw new TypeError('Argument #1 ($coroutine) must be of type Closure, '.get_debug_type($coroutine).' given');
+        }
+*/
+        $coroutine = Closure::fromCallable($coroutine);
         $co = new self($coroutine, $args);
 
         // swap in this coroutine temporarily and let it run one iteration
@@ -110,23 +116,22 @@ final class Coroutine extends Kernel implements StaticEventEmitterInterface {
     }
 
     /**
-     * Provide an opportunity for the current coroutine to be suspended. The coroutine
-     * will only be suspended if the interrupt time slice has been exceeded.
-     *
-     * @see Kernel::suspend()
-     */
-    public static function interrupt(): void {
-        if (Kernel::$current && (hrtime(true) - Kernel::$current->startTimeNS) > self::$interruptTimeNS) {
-            Kernel::suspend();
-        }
-    }
-
-    /**
      * Suspend the current coroutine until the next tick. When called from outside of a
      * coroutine, run one tick of coroutines.
      */
     public static function suspend(): void {
         Kernel::suspend();
+    }
+
+    /**
+     * Register a function to run as soon as possible.
+     *
+     * @param $callback The function to invoke
+     * @param $maxDelay The maximum number of seconds we can wait
+     */
+    public static function defer(callable $callback, float $maxDelay=0): void {
+        self::$deferred[] = $callback;
+        self::setMaxDelay($maxDelay);
     }
 
     /**
@@ -209,7 +214,7 @@ final class Coroutine extends Kernel implements StaticEventEmitterInterface {
     /**
      * Create a new coroutine instance and add it to the coroutine loop
      */
-    private function __construct(Closure $coroutine, array $args) {
+    private function __construct(callable $coroutine, array $args) {
         $this->id = self::$nextAvailableId++;
         $this->name = self::describeFunction($coroutine);
         self::$instanceCount++;

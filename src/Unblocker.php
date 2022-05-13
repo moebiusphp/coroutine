@@ -104,7 +104,7 @@ class Unblocker {
 
     public function stream_eof(): bool {
         Co::suspend();
-        $res = feof($this->fp);
+        $res = ftell($this->fp) === fstat($this->fp)['size'];
 
         if ($res) {
             /**

@@ -19,11 +19,6 @@ class Coroutines extends KernelModule {
     private array $active = [];
     private ?WeakMap $added=null;
 
-    /**
-     * Microtasks that are run after a coroutine is suspended
-     */
-    private array $microTasks = [];
-
     public function getCurrentCoroutine(): ?Coroutine {
         return $this->current;
     }
@@ -76,12 +71,12 @@ class Coroutines extends KernelModule {
         ++self::$moduleActivity[self::$name];
 
         $current = $this->current;
-        $microTasks = $this->microTasks;
-        $this->microTasks = [];
+        $microtasks = self::$microtasks;
+        self::$microtasks = [];
         $this->current = $co;
         $co->stepSignal();
-        $this->runMicroTasks();
-        $this->microTasks = $microTasks;
+        self::runMicrotasks();
+        self::$microtasks = $microtasks;
         $this->current = $current;
     }
 
@@ -89,24 +84,12 @@ class Coroutines extends KernelModule {
         foreach ($this->active as $co) {
             $this->current = $co;
             $co->stepSignal();
-            $this->runMicroTasks();
+            $this->runMicrotasks();
         }
         $this->current = null;
         if ($this->active !== []) {
             self::setMaxDelay(0);
         }
-    }
-
-    private function runMicroTasks(): void {
-        foreach ($this->microTasks as $k => $task) {
-            try {
-                $this->logDebug("Running microtask {key} for coroutine {id}", ['key' => $k, 'id' => $co->id]);
-                $task();
-            } catch (\Throwable $e) {
-                $this->logException($e);
-            }
-        }
-        $this->microTasks = [];
     }
 
     public function start(): void {

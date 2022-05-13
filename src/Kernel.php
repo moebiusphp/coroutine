@@ -13,7 +13,11 @@ use Moebius\Promise\{
     PromiseInterface,
     PromiseTrait
 };
-use Moebius\Coroutine\Kernel\IO;
+use Moebius\Coroutine\Kernel\Compat\{
+    React,
+    GuzzleHttp,
+    Revolt
+};
 use Fiber, SplMinHeap;
 
 /**
@@ -203,6 +207,12 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
     protected static array $hookAfterTick = [];
 
     /**
+     * Closures that should run as soon as possible after the current
+     * coroutine or before the next coroutine starts
+     */
+    protected static array $microtasks = [];
+
+    /**
      * Closures that should run as soon as possible after the cycle
      */
     protected static array $deferred = [];
@@ -221,7 +231,7 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
      * @return bool                 false if the stream is not readable (timed out or closed)
      */
     protected static function readable(mixed $resource, float $timeout=null): bool {
-        return self::$io->suspendUntil($resource, IO::READABLE, $timeout);
+        return self::$io->suspendUntil($resource, Kernel\IO::READABLE, $timeout);
     }
 
     /**
@@ -233,7 +243,7 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
      * @return bool                 false if the stream is no writable (timed out)
      */
     protected static function writable(mixed $resource, float $timeout=null): bool {
-        return self::$io->suspendUntil($resource, IO::WRITABLE, $timeout);
+        return self::$io->suspendUntil($resource, Kernel\IO::WRITABLE, $timeout);
     }
 
     /**
@@ -289,6 +299,18 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
         }
     }
 
+    protected static function runMicrotasks(): void {
+        foreach (self::$microtasks as $k => $task) {
+            try {
+                $this->logDebug("Running microtask {key} for coroutine {id}", ['key' => $k, 'id' => $co->id]);
+                $task();
+            } catch (\Throwable $e) {
+                $this->logException($e);
+            }
+        }
+        self::$microtasks = [];
+    }
+
     /**
      * Run the event loop until the provided callback returns false. Generally
      * it is preferable to use Co::await() to run the event loop until a promise is
@@ -326,20 +348,22 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
             $currentTime = self::getRealTime();
             $maxDelay = self::getMaxDelay();
 
-            if (count(self::$hookSleepFunctions) > 0) {
-                $delay = $maxDelay / count(self::$hookSleepFunctions);
-                foreach (self::$hookSleepFunctions as $sleepFunction) {
-                    $startTime = self::getRealTime();
-                    self::invoke($sleepFunction, $delay);
-                    $timeSpent = self::getRealTime() - $startTime;
-                    $delay = min($timeSpent, $delay);
+            if (self::getActivityLevel() > 0) {
+                if (count(self::$hookSleepFunctions) > 0) {
+                    $delay = $maxDelay / count(self::$hookSleepFunctions);
+                    foreach (self::$hookSleepFunctions as $sleepFunction) {
+                        $startTime = self::getRealTime();
+                        self::invoke($sleepFunction, $delay);
+                        $timeSpent = self::getRealTime() - $startTime;
+                        $delay = min($timeSpent, $delay);
+                    }
+                } else {
+                    usleep(floor($maxDelay * 1000000));
                 }
-            } else {
-                usleep(floor($maxDelay * 1000000));
             }
 
             self::$currentTime = self::getRealTime();
-            self::$nextTickTime = $currentTime + 2.0;
+            self::$nextTickTime = $currentTime + 0.5;
 
             /**
              * @see self::$hookBeforeTick
@@ -511,6 +535,22 @@ abstract class Kernel implements PromiseInterface, StaticEventEmitterInterface {
         self::$timers = self::$modules['core.timers'];
         self::$promises = self::$modules['core.promises'];
         self::$zombies = self::$modules['core.zombies'];
+
+        // detect any other supported event loops and integrate with them
+        if (class_exists(\React\EventLoop\Loop::class)) {
+            self::$modules[React::$name] = new React();
+            self::$modules[React::$name]->start();
+        }
+
+        if (class_exists(\Revolt\EventLoop::class)) {
+            self::$modules[Revolt::$name] = new Revolt();
+            self::$modules[Revolt::$name]->start();
+        }
+
+        if (class_exists(\GuzzleHttp\Promise\PromiseInterface::class)) {
+            self::$modules[GuzzleHttp::$name] = new GuzzleHttp();
+            self::$modules[GuzzleHttp::$name]->start();
+        }
 
         $bootstrapped = true;
 

@@ -251,6 +251,8 @@ final class Coroutine extends Kernel implements StaticEventEmitterInterface {
                 throw new LogicException("Coroutine in unknown state");
             }
 
+            self::runMicrotasks();
+
             $stepTimeNS = hrtime(true) - $this->startTimeNS;
             $this->totalTimeNS += $stepTimeNS;
             $this->longestStepTimeNS = max($stepTimeNS, $this->longestStepTimeNS);

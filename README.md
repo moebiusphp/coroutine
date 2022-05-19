@@ -36,7 +36,7 @@ not have to worry about that.
 When you create a coroutine, you get a promise about a future result. That future result can be
 accessed via the `then()` method, just like any other promise object you're used to.
 
-```
+```php
 <?php
 use Moebius\Coroutine as Co;
 
@@ -52,7 +52,7 @@ $coroutine->then(function() {
 
 ### A Promise is a Coroutine
 
-```
+```php
 <?php
 use Moebius\Coroutine as Co;
 use GuzzleHttp\Client;
@@ -67,15 +67,14 @@ function get(string $url) {
 $google = Co::go(get(...), 'https://www.google.com');
 $bing = Co::go(get(...), 'https://www.bing.com');
 $ddg = Co::go(get(...), 'https://www.duckduckgo.com');
-
-
+```
 
 ## Examples
 
 You can find complete examples in the `examples/` folder. Here is a trivial example
 that reads lines from multiple files concurrently:
 
-```
+```php
 <?php
     require "vendor/autoload.php";
 
@@ -99,10 +98,6 @@ that reads lines from multiple files concurrently:
     }
 ```
 
-
-
-
-
 Deceptivly simple API:
 
  * Import the functions you want to use: `import function M\{go, await, sleep, unblock, run};`
@@ -118,7 +113,7 @@ Deceptivly simple API:
  * Create a "background task" that runs every N seconds by calling `sleep()`. This special version of `sleep()` will
    let other coroutines do some work while the main thread is blocked.
 
-    ```
+    ```php
     <?php
     use function M\{go, sleep};
     go(function() {
@@ -142,13 +137,13 @@ Creates a coroutine which will run in parallel whenever other scripts are blocke
 
 Object-oriented style
 
-```
+```php
 public static Moebius\Coroutine::go(callable $callback): Moebius\Coroutine
 ```
 
 Procedural style
 
-```
+```php
 M\go(callable $callback, mixed ...$args): Moebius\Coroutine
 ```
 
@@ -172,13 +167,13 @@ Await the result from a future value or a promise without blocking other corouti
 
 Object-oriented style
 
-```
+```php
 public static Moebius\Coroutine::await(object $thenable): mixed
 ```
 
 Procedural style
 
-```
+```php
 M\await(object $thenable): mixed
 ```
 
@@ -204,13 +199,13 @@ Combines the `M\go` and `M\await` functions, to simplify writing coroutine-ready
 
 Object-oriented style
 
-```
+```php
 public static Moebius\Coroutine::run(callable $callback, mixed ...$args): mixed
 ```
 
 Procedural style
 
-```
+```php
 M\go(callable $callback, mixed ...$args): mixed
 ```
 
@@ -234,13 +229,13 @@ Allow other coroutines to do work until reading from a stream resource will not 
 
 Object-oriented style
 
-```
+```php
 public static Moebius\Coroutine::readable(mixed $resource): void
 ```
 
 Procedural style
 
-```
+```php
 M\readable(mixed $resource): void
 ```
 
@@ -262,13 +257,13 @@ Allow other coroutines to do work until writing to the stream resource will not 
 
 Object-oriented style
 
-```
+```php
 public static Moebius\Coroutine::writable(mixed $resource): void
 ```
 
 Procedural style
 
-```
+```php
 M\writable(mixed $resource): void
 ```
 
@@ -290,13 +285,13 @@ Pauses the local function execution while allowing other coroutines to proceed w
 
 Object-oriented style
 
-```
+```php
 public static Moebius\Coroutine::sleep(float $seconds): void
 ```
 
 Procedural style
 
-```
+```php
 M\sleep(float $seconds): void
 ```
 
@@ -326,7 +321,6 @@ None
 
 No value is returned
 
-
 ---
 
 Examples
@@ -334,7 +328,7 @@ Examples
 
 ### 100 coroutines in parallel
 
-```
+```php
 <?php
     use function M\{go, sleep, await);
 
@@ -361,7 +355,7 @@ Examples
 
 ### Background tick function every 0.5 seconds
 
-```
+```php
 <?php
     use function M\{go, sleep};
 
@@ -375,7 +369,7 @@ Examples
 
 ### Schedule a function to run in 10 seconds
 
-```
+```php
 <?php
     use function M\{go, sleep};
 
@@ -481,13 +475,13 @@ This way you do not have to think about blocking or non-blocking stream operatio
 
 Change:
 
-```
+```php
     $fp = fopen('some-resource.txt', 'r');
 ```
 
 to
 
-```
+```php
     $fp = M\unblock(fopen('some-resource.txt', 'rn'));
 ```
 
@@ -502,7 +496,7 @@ The PHP functions `file_get_contents()` and `file_put_contents()` are very commo
 for reading files. By simply importing these drop-in replacement functions you will automatically
 enable concurrency.
 
-```
+```php
 <?php
     use M\{file_get_contents, file_put_contents};
 ```

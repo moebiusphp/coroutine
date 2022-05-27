@@ -35,7 +35,7 @@ Co::go(function() use ($fn) {
     fwrite($write, "E\n");
 });
 
-Co::await(function() use (&$done) {
+Co::await(Co::go(function() use (&$done) {
     Co::sleep(0.1);
     echo "F\n";
-});
+}));

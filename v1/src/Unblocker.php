@@ -2,7 +2,6 @@
 namespace Moebius\Coroutine;
 
 use Moebius\Coroutine as Co;
-use Moebius\Loop;
 
 /**
  * This class will proxy a stream to ensure automatic context switching
@@ -111,7 +110,7 @@ class Unblocker {
             /**
              * Handle a bug or annoying "feature" where PHP caches forever a positive EOF
              */
-            Loop::defer(function() {
+            Co::defer(function() {
                 if (isset(self::$results[$this->id])) {
                     fseek(self::$results[$this->id], 0, \SEEK_CUR);
                 }

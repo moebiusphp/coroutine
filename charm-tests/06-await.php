@@ -4,25 +4,25 @@ require(__DIR__.'/../vendor/autoload.php');
 use Moebius\Coroutine as Co;
 use Moebius\Loop;
 
-echo Co::await(function() {
+echo Co::await(Co::go(function() {
     return "A";
-});
+}));
 
-echo Co::await(function() {
+echo Co::await(Co::go(function() {
     echo "B";
-    return Co::await(function() {
+    return Co::await(Co::go(function() {
         Co::suspend();
         return "C";
-    });
-});
+    }));
+}));
 
-echo Co::await(function() {
+echo Co::await(Co::go(function() {
     echo "D";
-    Co::await(function() {
+    Co::await(Co::go(function() {
         Co::suspend();
         echo "E";
-    });
+    }));
     echo "F";
-});
+}));
 
 echo "G\n";

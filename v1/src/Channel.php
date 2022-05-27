@@ -2,7 +2,6 @@
 namespace Moebius\Coroutine;
 
 use Moebius\Promise;
-use Moebius\Deferred;
 use Moebius\Coroutine as Co;
 
 /**
@@ -28,7 +27,7 @@ use Moebius\Coroutine as Co;
  * If the channel is buffered, the message will be received immediately
  * without blocking the sender - as long as the buffer is not full.
  */
-class Channel {
+class Channel extends Kernel {
 
     protected string $type;
     protected int $bufferSize;
@@ -63,9 +62,9 @@ class Channel {
         $message = serialize($value);
         $value = null;
 
-        $promise = new Deferred();
+        $promise = new Promise();
         $this->writers[] = function() use ($message, $promise) {
-            $promise->fulfill(null);
+            $promise->resolve(null);
             return $message;
         };
         $this->process();
@@ -73,9 +72,9 @@ class Channel {
     }
 
     public function receive(): mixed {
-        $promise = new Deferred();
+        $promise = new Promise();
         $this->readers[] = function(string $message) use ($promise) {
-            $promise->fulfill($message);
+            $promise->resolve($message);
         };
         $this->process();
         return unserialize(Co::await($promise));
@@ -85,14 +84,14 @@ class Channel {
         // fill the buffer to (number_of_readers + buffer_size) if possible
         while (count($this->writers) > 0 && count($this->buffer) < (count($this->readers) + $this->bufferSize)) {
             $writer = array_shift($this->writers);
-            $this->buffer[] = $writer();
+            $this->buffer[] = self::invoke($writer);
         }
 
         // empty the buffer until we have no more readers or no more buffer
         while (count($this->buffer) > 0 && count($this->readers) > 0) {
             $message = array_shift($this->buffer);
             $reader = array_shift($this->readers);
-            $reader($message);
+            self::invoke($reader, $message);
         }
     }
 
@@ -150,7 +149,7 @@ class Channel {
     private function refillBuffer(): void {
         while (count($this->writers) > 0 && count($this->buffer) < $this->bufferSize) {
             $writer = array_shift($this->writers);
-            $this->buffer[] = $writer();
+            $this->buffer[] = self::invoke($writer);
         }
     }
 

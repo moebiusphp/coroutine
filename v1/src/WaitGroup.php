@@ -2,17 +2,16 @@
 namespace Moebius\Coroutine;
 
 use Moebius\Coroutine as Co;
-use Moebius\Deferred;
-use Moebius\PromiseInterface;
+use Moebius\Promise;
 
-final class WaitGroup {
+final class WaitGroup extends Kernel {
 
     private int $value = 0;
     private array $waiting = [];
-    private PromiseInterface $promise;
+    private Promise $promise;
 
     public function __construct() {
-        $this->promise = new Deferred();
+        $this->promise = new Promise();
     }
 
     /**
@@ -67,7 +66,7 @@ final class WaitGroup {
      */
     private function check(): void {
         if ($this->value <= 0) {
-            $this->promise->fulfill(null);
+            $this->promise->resolve(null);
         }
     }
 }

@@ -6,6 +6,11 @@ use Moebius\Coroutine\Unblocker;
 use Moebius\Loop;
 
 $fp = tmpfile();
+register_shutdown_function(function() use ($fp) {
+    $meta = stream_get_meta_data($fp);
+    unlink($meta['uri']);
+});
+
 $fp = Unblocker::unblock($fp);
 
 $a = Co::go(function() use ($fp) {
@@ -20,3 +25,6 @@ $b = Co::go(function() use ($fp) {
 });
 
 echo "B";
+
+// Allow fwrite to finish
+Co::sleep(0.1);

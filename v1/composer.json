@@ -3,21 +3,25 @@
     "description": "Easy to use coroutines for PHP.",
     "type": "library",
     "require": {
-        "moebius/promise": ">=1 <2",
-        "moebius/loop": ">=1 <2"
+        "moebius/promise": ">=1.0"
     },
     "suggest": {
         "moebius/async-file": "Automatically and transparently makes blocking file system operations non-blocking"
     },
     "require-dev": {
-        "charm/testing": ">=0"
+        "charm/testing": ">=0",
+        "evenement/evenement": "^3.0",
+        "react/http": "^1.6",
+        "amphp/amp": "^2.6",
+        "revolt/event-loop": "^0.2.4"
     },
     "license": "MIT",
     "autoload": {
         "psr-4": {
             "Moebius\\Coroutine\\": "src/"
         },
-        "classmap": ["Coroutine.php"]
+        "classmap": ["Coroutine.php"],
+        "files": ["functions.php", "exceptions.php"]
     },
     "authors": [
         {
@@ -30,9 +34,6 @@
     "scripts": {
         "test": [
             "vendor/bin/charm-testing"
-        ],
-        "test-all": [
-            "bin/test-all.php"
         ]
     }
 }

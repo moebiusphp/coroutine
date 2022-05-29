@@ -11,6 +11,8 @@ use Moebius\Loop;
  */
 class Unblocker {
 
+    private bool $destroyed = false;
+
     public $context;
     public $resource;
 
@@ -92,19 +94,23 @@ class Unblocker {
         $this->mode = $mode;
         $this->options = $options;
         stream_set_blocking($this->fp, false);
-        Co::suspend();
+        $this->suspend();
         return true;
+    }
+
+    public function __destruct() {
+        $this->destroyed = true;
     }
 
     public function stream_close(): void {
         fclose($this->fp);
         unset(self::$resources[$this->id]);
         unset(self::$results[$this->id]);
-        Co::suspend();
+        $this->suspend();
     }
 
     public function stream_eof(): bool {
-        Co::suspend();
+        $this->suspend();
         $res = ftell($this->fp) === fstat($this->fp)['size'];
 
         if ($res) {
@@ -122,7 +128,9 @@ class Unblocker {
     }
 
     public function stream_flush(): bool {
-        Co::suspend();
+        if (!$this->writable($this->fp)) {
+            return false;
+        }
         return fflush($this->fp);
     }
 
@@ -130,14 +138,14 @@ class Unblocker {
         $blocking = !($operation & LOCK_NB);
         while (is_resource($this->fp) && !flock($this->fp, $operation | LOCK_NB, $wouldBlock)) {
             if (!$blocking || !$wouldBlock) {
-                Co::suspend();
+                $this->suspend();
                 return false;
             }
-            Co::suspend();
+            $this->suspend();
             // prevent an immediate new suspend
             self::$noSuspend = Co::getTickCount();
         }
-        Co::suspend();
+        $this->suspend();
         if (!is_resource($this->fp)) {
             trigger_error("Stream resource is invalid", E_USER_ERROR);
             return false;
@@ -147,12 +155,12 @@ class Unblocker {
 
     public function stream_read(int $count): string|false {
         if ($this->pretendNonBlocking) {
-            if (!self::readable($this->fp, 0)) {
+            if (!$this->readable($this->fp, 0)) {
                 return '';
             }
             return fread($this->fp, $count);
         }
-        if (!self::readable($this->fp, $this->readTimeout)) {
+        if (!$this->readable($this->fp, $this->readTimeout)) {
             // timed out
             return false;
         }
@@ -160,13 +168,13 @@ class Unblocker {
     }
 
     public function stream_seek(int $offset, int $whence = SEEK_SET): bool {
-        Co::suspend();
+        $this->suspend();
         fseek($this->fp, $offset, $whence);
         return true;
     }
 
     public function stream_set_option(int $option, int $arg1=null, int $arg2=null): bool {
-        Co::suspend();
+        $this->suspend();
         switch ($option) {
             case STREAM_OPTION_BLOCKING:
                 // The method was called in response to stream_set_blocking()
@@ -199,39 +207,51 @@ class Unblocker {
     }
 
     public function stream_stat(): array|false {
-        Co::suspend();
+        $this->suspend();
         return fstat($this->fp);
     }
 
     public function stream_tell(): int {
-        Co::suspend();
+        $this->suspend();
         return ftell($this->fp);
     }
 
     public function stream_truncate(int $new_size): bool {
-        Co::suspend();
+        $this->suspend();
         return ftruncate($this->fp, $new_size);
     }
 
     public function stream_write(string $data): int {
         if ($this->pretendNonBlocking) {
-            if (!self::writable($this->fp, 0)) {
+            if (!$this->writable($this->fp, 0)) {
                 return 0;
             }
             return fwrite($this->fp, $count);
         }
-        if (!self::writable($this->fp, $this->readTimeout)) {
+        if (!$this->writable($this->fp, $this->readTimeout)) {
             // timed out
             return 0;
         }
         return fwrite($this->fp, $data);
     }
 
-    protected static function readable(mixed $stream, float $timeout=null): bool {
+    protected function readable(mixed $stream, float $timeout=null): bool {
+        if ($this->destroyed) {
+            return false;
+        }
         return Co::readable($stream, $timeout);
     }
 
-    protected static function writable(mixed $stream, float $timeout=null): bool {
+    protected function writable(mixed $stream, float $timeout=null): bool {
+        if ($this->destroyed) {
+            return false;
+        }
         return Co::writable($stream, $timeout);
+    }
+
+    protected function suspend(): void {
+        if (!$this->destroyed) {
+            Co::suspend();
+        }
     }
 }

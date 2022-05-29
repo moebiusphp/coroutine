@@ -3,8 +3,10 @@ namespace Moebius;
 
 use Fiber, Closure, Throwable;
 use Moebius\{
-    Loop,
-    Promise\ProtoPromise
+    Loop
+};
+use Moebius\Promise\{
+    ProtoPromise,
 };
 use Moebius\Loop\{
     Timer,

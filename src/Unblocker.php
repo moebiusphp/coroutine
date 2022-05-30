@@ -32,7 +32,7 @@ class Unblocker {
      */
     protected static $noSuspend = null;
 
-    protected static $registered = false;
+    protected static bool $registered = false;
 
     /**
      * Check if the provided resource is an unblocked proxy stream, or if

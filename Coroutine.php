@@ -75,6 +75,16 @@ class Coroutine extends ProtoPromise {
         try {
             $this->fiber = new Fiber($callback);
             $this->handle($this->fiber->start(...$args));
+        } catch (\FiberError $e) {
+            // In some cases the task will be launched in an invalid context
+            Loop::queueMicrotask(function() use ($args) {
+                try {
+                    $this->handle($this->fiber->start(...$args));
+                } catch (Throwable $e) {
+                    $this->reject($e);
+                }
+            });
+
         } catch (Throwable $e) {
             $this->reject($e);
         }
@@ -97,6 +107,15 @@ class Coroutine extends ProtoPromise {
     private function resume(mixed $result=null): void {
         try {
             $this->handle($this->fiber->resume($result));
+        } catch (\FiberError $e) {
+            // In some cases the task will be launched in an invalid context
+            Loop::queueMicrotask(function() use ($result) {
+                try {
+                    $this->handle($this->fiber->resume($result));
+                } catch (Throwable $e) {
+                    $this->reject($e);
+                }
+            });
         } catch (Throwable $e) {
             $this->reject($e);
         }
@@ -108,6 +127,15 @@ class Coroutine extends ProtoPromise {
         }
         try {
             $this->handle($this->fiber->throw($reason));
+        } catch (\FiberError $e) {
+            // In some cases the task will be launched in an invalid context
+            Loop::queueMicrotask(function() use ($reason) {
+                try {
+                    $this->handle($this->fiber->throw($reason));
+                } catch (Throwable $e) {
+                    $this->reject($e);
+                }
+            });
         } catch (Throwable $e) {
             $this->reject($e);
         }

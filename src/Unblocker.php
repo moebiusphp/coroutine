@@ -111,6 +111,12 @@ class Unblocker {
 
     public function stream_eof(): bool {
         $this->suspend();
+
+        $size = fstat($this->fp)['size'];
+        $tell = ftell($this->fp);
+
+        $res = $tell === $size;
+
         $res = ftell($this->fp) === fstat($this->fp)['size'];
 
         if ($res) {
@@ -123,6 +129,8 @@ class Unblocker {
                 }
             });
         }
+
+        return feof($this->fp);
 
         return $res;
     }
@@ -169,8 +177,8 @@ class Unblocker {
 
     public function stream_seek(int $offset, int $whence = SEEK_SET): bool {
         $this->suspend();
-        fseek($this->fp, $offset, $whence);
-        return true;
+        $res = @fseek($this->fp, $offset, $whence);
+        return $res === 0;
     }
 
     public function stream_set_option(int $option, int $arg1=null, int $arg2=null): bool {

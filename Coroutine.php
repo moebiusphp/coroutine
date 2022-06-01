@@ -17,25 +17,65 @@ use Moebius\Coroutine\Unblocker;
 
 class Coroutine extends ProtoPromise {
 
+    /**
+     * Counts how many coroutines are waiting for a promise at any time
+     */
+    private static int $awaitCount = 0;
+    /**
+     * The peak number of awaiting coroutines
+     */
+    private static int $awaitPeak = 0;
+    /**
+     * Counts how many coroutines are in memory at any time
+     */
+    private static int $coroutineCount = 0;
+    /**
+     * The peak number of coroutines
+     */
+    private static int $coroutinePeak = 0;
+    /**
+     * Counts how many coroutines are sleeping at any time
+     */
+    private static int $sleepCount = 0;
+    /**
+     * The peak number of simultaneous sleep
+     */
+    private static int $sleepPeak = 0;
+    /**
+     * How many times coroutines have resumed (context switches)
+     */
+    private static int $coroutineResumeCount = 0;
+    /**
+     * Counts how many times exceptions have been thrown into
+     * coroutines
+     */
+    private static int $coroutineThrowCount = 0;
+
     public static function go(Closure $callback, mixed ...$args): PromiseInterface {
         return new self($callback, ...$args);
     }
 
     public static function await(object $promise): mixed {
-        if (Fiber::getCurrent()) {
-            return Fiber::suspend($promise);
-        } else {
-            return Loop::await($promise);
+        self::$awaitPeak = max(++self::$awaitCount, self::$awaitPeak);
+        try {
+            if (Fiber::getCurrent()) {
+                return Fiber::suspend($promise);
+            } else {
+                return Loop::await($promise);
+            }
+        } finally {
+            --self::$awaitCount;
         }
     }
 
     public static function run(Closure $callback, mixed ...$args): mixed {
-        $co = new self($callback, ...$args);
-        return self::await($co);
+        return self::await(self::go($callback, ...$args));
     }
 
     public static function sleep(float $time): void {
+        self::$sleepPeak = max(++self::$sleepCount, self::$sleepPeak);
         self::await(new Timer($time));
+        --self::$sleepCount();
     }
 
     public static function suspend(): void {
@@ -72,10 +112,13 @@ class Coroutine extends ProtoPromise {
     private mixed $value;
 
     private function __construct(Closure $callback, mixed ...$args) {
+        self::$coroutinePeak = max(++self::$coroutineCount, self::$coroutinePeak);
         try {
             $this->fiber = new Fiber($callback);
-            $this->handle($this->fiber->start(...$args));
+            $result = $this->fiber->start(...$args);
+            $this->handle($result);
         } catch (\FiberError $e) {
+            throw $e;
             // In some cases the task will be launched in an invalid context
             Loop::queueMicrotask(function() use ($args) {
                 try {
@@ -90,9 +133,15 @@ class Coroutine extends ProtoPromise {
         }
     }
 
+    public function __destruct() {
+        --self::$coroutinePeak;
+        parent::__destruct();
+    }
+
     private function handle(mixed $intermediate): void {
         if ($this->fiber->isTerminated()) {
-            $this->fulfill($this->fiber->getReturn());
+            $returnValue = $this->fiber->getReturn();
+            $this->fulfill($returnValue);
         } elseif ($intermediate !== null && is_object($intermediate) && Promise::isPromise($intermediate)) {
             // Resume the fiber when the promise is resolved
             $intermediate->then(
@@ -105,9 +154,11 @@ class Coroutine extends ProtoPromise {
     }
 
     private function resume(mixed $result=null): void {
+        ++self::$coroutineResumeCount;
         try {
             $this->handle($this->fiber->resume($result));
         } catch (\FiberError $e) {
+            throw $e;
             // In some cases the task will be launched in an invalid context
             Loop::queueMicrotask(function() use ($result) {
                 try {
@@ -122,6 +173,7 @@ class Coroutine extends ProtoPromise {
     }
 
     private function throwException($reason): void {
+        ++self::$coroutineThrowCount;
         if (!($reason instanceof Throwable)) {
             $reason = new RejectedException($reason);
         }

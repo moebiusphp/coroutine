@@ -3,8 +3,8 @@
     "description": "Easy to use coroutines for PHP.",
     "type": "library",
     "require": {
-        "moebius/promise": "dev-master",
-        "moebius/loop": "dev-master"
+        "moebius/promise": "1.0.100",
+        "moebius/loop": "1.0.100"
     },
     "suggest": {
         "moebius/async-file": "Automatically and transparently makes blocking file system operations non-blocking"

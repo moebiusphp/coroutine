@@ -74,8 +74,8 @@ class Coroutine extends ProtoPromise {
 
     public static function sleep(float $time): void {
         self::$sleepPeak = max(++self::$sleepCount, self::$sleepPeak);
-        self::await(new Timer($time));
-        --self::$sleepCount();
+        self::await(Loop::delay($time));
+        --self::$sleepCount;
     }
 
     public static function suspend(): void {
@@ -87,18 +87,54 @@ class Coroutine extends ProtoPromise {
     }
 
     public static function readable($fp, float $timeout=null): bool {
-        $result = self::await(new Readable($fp, $timeout));
-        return true;
+        $result = true;
+        $promise = Loop::readable($fp);
+        if ($timeout) {
+            $promise = Promise::any([$promise, Loop::delay($timeout, function() use ($result) {
+                $result = false;
+            })]);
+        }
+        self::await($promise);
+        return $result;
     }
 
     public static function writable($fp, float $timeout=null): bool {
-        $result = self::await(new Writable($fp, $timeout));
-        return true;
+        $result = true;
+        $promise = Loop::writable($fp);
+        if ($timeout) {
+            $promise = Promise::any([$promise, Loop::delay($timeout, function() use ($result) {
+                $result = false;
+            })]);
+        }
+        self::await($promise);
+        return $result;
+    }
+
+    /**
+     * Give the current coroutine priority to complete blocking all other
+     * coroutines from progressing.
+     *
+     * @internal
+     */
+    public static function focus(): void {
+        self::$focus = true;
+        self::$focusFiber = Fiber::getCurrent();
+    }
+
+    /**
+     * Allow other coroutines to continue progressing.
+     */
+    public static function unfocus(): void {
+        self::$focus = false;
+        self::$focusFiber = null;
     }
 
     public static function unblock($fp) {
         return Unblocker::unblock($fp);
     }
+
+    private static bool $focus = false;
+    private static ?Fiber $focusFiber = null;
 
     public array $onFulfill = [];
     public array $onReject = [];
@@ -113,22 +149,26 @@ class Coroutine extends ProtoPromise {
 
     private function __construct(Closure $callback, mixed ...$args) {
         self::$coroutinePeak = max(++self::$coroutineCount, self::$coroutinePeak);
+        $this->fiber = new Fiber($callback);
+        $this->start(...$args);
+    }
+
+    private function start(mixed ...$args): void {
+        if (self::$focus && self::$focusFiber !== $this->fiber) {
+            echo "Delaying fiber start\n";
+debug_print_backtrace();
+            Loop::defer(function() use ($args) {
+                $this->start(...$args);
+            });
+            return;
+        }
         try {
-            $this->fiber = new Fiber($callback);
             $result = $this->fiber->start(...$args);
             $this->handle($result);
         } catch (\FiberError $e) {
             throw $e;
-            // In some cases the task will be launched in an invalid context
-            Loop::queueMicrotask(function() use ($args) {
-                try {
-                    $this->handle($this->fiber->start(...$args));
-                } catch (Throwable $e) {
-                    $this->reject($e);
-                }
-            });
-
         } catch (Throwable $e) {
+            self::unfocus();
             $this->reject($e);
         }
     }
@@ -141,6 +181,8 @@ class Coroutine extends ProtoPromise {
     private function handle(mixed $intermediate): void {
         if ($this->fiber->isTerminated()) {
             $returnValue = $this->fiber->getReturn();
+            // locking stops here regardless
+            self::unfocus();
             $this->fulfill($returnValue);
         } elseif ($intermediate !== null && is_object($intermediate) && Promise::isPromise($intermediate)) {
             // Resume the fiber when the promise is resolved
@@ -154,20 +196,21 @@ class Coroutine extends ProtoPromise {
     }
 
     private function resume(mixed $result=null): void {
+        if (self::$focus && self::$focusFiber !== $this->fiber) {
+            echo "Delaying fiber resume\n";
+            Loop::defer(function() use ($result) {
+                $this->resume($result);
+            });
+            return;
+        }
         ++self::$coroutineResumeCount;
         try {
             $this->handle($this->fiber->resume($result));
         } catch (\FiberError $e) {
+            self::unfocus();
             throw $e;
-            // In some cases the task will be launched in an invalid context
-            Loop::queueMicrotask(function() use ($result) {
-                try {
-                    $this->handle($this->fiber->resume($result));
-                } catch (Throwable $e) {
-                    $this->reject($e);
-                }
-            });
         } catch (Throwable $e) {
+            self::unfocus();
             $this->reject($e);
         }
     }
@@ -185,10 +228,12 @@ class Coroutine extends ProtoPromise {
                 try {
                     $this->handle($this->fiber->throw($reason));
                 } catch (Throwable $e) {
+                    self::$locked = false;
                     $this->reject($e);
                 }
             });
         } catch (Throwable $e) {
+            self::unfocus();
             $this->reject($e);
         }
     }

@@ -58,13 +58,12 @@ class Unblocker {
         }
 
         self::register(); // $meta['uri'] ? STREAM_IS_URL : 0);
-
-//        stream_set_read_buffer($resource, 0);
+        stream_set_read_buffer($resource, 0);
+        stream_set_write_buffer($resource, 0);
         $meta = stream_get_meta_data($resource);
         self::$resources[$id] = $resource;
         $result = fopen('moebius-unblocker://'.$id, $meta['mode']);
         self::$results[$id] = $result;
-
         return $result;
     }
 
@@ -94,7 +93,6 @@ class Unblocker {
         $this->mode = $mode;
         $this->options = $options;
         stream_set_blocking($this->fp, false);
-        $this->suspend();
         return true;
     }
 

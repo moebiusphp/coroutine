@@ -19,7 +19,7 @@ clearstatcache();
 
 Co::go(function() use ($fn, &$done) {
     echo "A";
-    $read = Co::unblock(fopen($fn, 'rn'));
+    $read = Co::unblock(fopen($fn, 'r'));
     echo "C";
     while (!feof($read)) {
         echo trim(fgets($read, 4096));
@@ -29,12 +29,12 @@ Co::go(function() use ($fn, &$done) {
 });
 Co::go(function() use ($fn) {
     echo "B";
-    $write = Co::unblock(fopen($fn, 'r+'));
-    echo "D";
-    fwrite($write, "E\n");
+    $write = Co::unblock(fopen($fn, 'w'));
+    echo "C";
+    fwrite($write, "D\n");
 });
 
 Co::await(Co::go(function() use (&$done) {
     Co::sleep(0.1);
-    echo "F\n";
+    echo "E\n";
 }));

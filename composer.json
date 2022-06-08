@@ -4,7 +4,8 @@
     "type": "library",
     "require": {
         "moebius/promise": ">=1.0.100",
-        "moebius/loop": ">=1.0.100"
+        "moebius/loop": ">=1.0.100",
+        "moebius/common": ">=1.0"
     },
     "suggest": {
         "moebius/async-file": "Automatically and transparently makes blocking file system operations non-blocking"

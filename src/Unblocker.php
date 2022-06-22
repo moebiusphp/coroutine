@@ -1,8 +1,14 @@
 <?php
 namespace Moebius\Coroutine;
 
+use function get_resource_id, is_resource, fwrite, stream_set_read_buffer, stream_set_write_buffer,
+    stream_set_blocking, stream_get_meta_data, fclose, fopen, stream_wrapper_register, stream_wrapper_unregister,
+    intval, fstat, ftell, fseek, fflush, trigger_error, fread, ftruncate;
+
 use Moebius\Coroutine as Co;
 use Moebius\Loop;
+use Psr\Log\LoggerInterface;
+use Charm\FallbackLogger;
 
 /**
  * This class will proxy a stream to ensure automatic context switching
@@ -11,13 +17,19 @@ use Moebius\Loop;
  */
 class Unblocker {
 
+    /**
+     * Becomes true when Unblocker::__destruct() is called, and serves to prevent
+     * that we do stuff on the stream after it is closed because of event loop
+     * semantics.
+     */
     private bool $destroyed = false;
 
     public $context;
     public $resource;
 
     protected int $id;
-    protected $fp;
+    protected $internalFP;
+    protected $externalFP;
     protected string $mode;
     protected int $options;
     protected ?float $readTimeout = null;
@@ -26,11 +38,8 @@ class Unblocker {
 
     protected static $resources = [];
     protected static $results = [];
-
-    /**
-     * A tick number where we will not suspend, since we just came back from our own suspend
-     */
-    protected static $noSuspend = null;
+    protected static $instances = [];
+    protected static ?LoggerInterface $logger = null;
 
     protected static bool $registered = false;
 
@@ -58,12 +67,13 @@ class Unblocker {
         }
 
         self::register(); // $meta['uri'] ? STREAM_IS_URL : 0);
-        stream_set_read_buffer($resource, 0);
-        stream_set_write_buffer($resource, 0);
         $meta = stream_get_meta_data($resource);
         self::$resources[$id] = $resource;
         $result = fopen('moebius-unblocker://'.$id, $meta['mode']);
+        stream_set_read_buffer($result, 0);
+        stream_set_write_buffer($result, 0);
         self::$results[$id] = $result;
+//var_dump(self::$instances[$id]);
         return $result;
     }
 
@@ -72,7 +82,7 @@ class Unblocker {
             return;
         }
         self::$registered = true;
-        stream_wrapper_register('moebius-unblocker', self::class, 0);
+        stream_wrapper_register('moebius-unblocker', self::class, \STREAM_IS_URL);
     }
 
     protected static function unregister(): void {
@@ -84,15 +94,18 @@ class Unblocker {
     }
 
     public function stream_open(string $path, string $mode, int $options, ?string &$opened_path): bool {
+        MOEBIUS_DEBUG and self::debugLogFunc(__METHOD__);
         $this->id = intval(substr($path, 20));
         if (!isset(self::$resources[$this->id])) {
             return false;
         }
 
-        $this->fp = self::$resources[$this->id];
+        self::$instances[$this->id] = $this;
+
+        $this->internalFP = self::$resources[$this->id];
         $this->mode = $mode;
         $this->options = $options;
-        stream_set_blocking($this->fp, false);
+        stream_set_blocking($this->internalFP, false);
         return true;
     }
 
@@ -101,21 +114,34 @@ class Unblocker {
     }
 
     public function stream_close(): void {
-        fclose($this->fp);
+        MOEBIUS_DEBUG and self::debugLogFunc(__METHOD__);
+        fclose($this->internalFP);
         unset(self::$resources[$this->id]);
         unset(self::$results[$this->id]);
-        $this->suspend();
     }
 
     public function stream_eof(): bool {
-        $this->suspend();
-
-        $size = fstat($this->fp)['size'];
-        $tell = ftell($this->fp);
+        MOEBIUS_DEBUG and self::debugLogFunc(__METHOD__);
+        if (feof($this->internalFP)) {
+            $id = $this->id;
+            Loop::queueMicrotask(static function() use ($id) {
+                /**
+                 * Handle a bug or annoying "feature" where PHP caches forever a positive EOF.
+                 * This is mostly important for FIFO files.
+                 */
+                if (isset(self::$results[$id])) {
+                    fseek(self::$results[$id], 0, \SEEK_CUR);
+                }
+            });
+            return true;
+        }
+        return false;
+        $size = fstat($this->internalFP)['size'];
+        $tell = ftell($this->internalFP);
 
         $res = $tell === $size;
 
-        $res = ftell($this->fp) === fstat($this->fp)['size'];
+        $res = ftell($this->internalFP) === fstat($this->internalFP)['size'];
 
         if ($res) {
             /**
@@ -128,31 +154,30 @@ class Unblocker {
             });
         }
 
-        return feof($this->fp);
+        return feof($this->internalFP);
 
         return $res;
     }
 
     public function stream_flush(): bool {
-        if (!$this->writable($this->fp)) {
+        MOEBIUS_DEBUG and self::debugLogFunc(__METHOD__);
+        if (!$this->writable($this->internalFP)) {
             return false;
         }
-        return fflush($this->fp);
+        return fflush($this->internalFP);
     }
 
     public function stream_lock(int $operation): bool {
+        MOEBIUS_DEBUG and self::debugLogFunc(__METHOD__);
         $blocking = !($operation & LOCK_NB);
-        while (is_resource($this->fp) && !flock($this->fp, $operation | LOCK_NB, $wouldBlock)) {
+        while (is_resource($this->internalFP) && !flock($this->internalFP, $operation | LOCK_NB, $wouldBlock)) {
             if (!$blocking || !$wouldBlock) {
                 $this->suspend();
                 return false;
             }
             $this->suspend();
-            // prevent an immediate new suspend
-            self::$noSuspend = Co::getTickCount();
         }
-        $this->suspend();
-        if (!is_resource($this->fp)) {
+        if (!is_resource($this->internalFP)) {
             trigger_error("Stream resource is invalid", E_USER_ERROR);
             return false;
         }
@@ -160,47 +185,52 @@ class Unblocker {
     }
 
     public function stream_read(int $count): string|false {
+        MOEBIUS_DEBUG and self::debugLogFunc(__METHOD__);
         if ($this->pretendNonBlocking) {
-            if (!$this->readable($this->fp, 0)) {
-                return '';
+            if (!$this->readable($this->internalFP, 0)) {
+                $result = '';
+            } else {
+                $result = fread($this->internalFP, $count);
             }
-            return fread($this->fp, $count);
+        } else {
+            if (!$this->readable($this->internalFP, $this->readTimeout)) {
+                // timed out
+                return false;
+            }
+            $result = fread($this->internalFP, $count);
         }
-        if (!$this->readable($this->fp, $this->readTimeout)) {
-            // timed out
-            return false;
-        }
-        return fread($this->fp, $count);
+        //echo strtr($result, [ "\n" => "\n <<< " ]);
+        return $result;
     }
 
     public function stream_seek(int $offset, int $whence = SEEK_SET): bool {
-        $this->suspend();
-        $res = @fseek($this->fp, $offset, $whence);
+        MOEBIUS_DEBUG and self::debugLogFunc(__METHOD__);
+        $res = @fseek($this->internalFP, $offset, $whence);
         return $res === 0;
     }
 
     public function stream_set_option(int $option, int $arg1=null, int $arg2=null): bool {
-        $this->suspend();
+        MOEBIUS_DEBUG and self::debugLogFunc(__METHOD__);
         switch ($option) {
-            case STREAM_OPTION_BLOCKING:
+            case \STREAM_OPTION_BLOCKING:
                 // The method was called in response to stream_set_blocking()
                 $this->pretendNonBlocking = $arg1 === 0;
                 return true;
 
-            case STREAM_OPTION_READ_TIMEOUT:
+            case \STREAM_OPTION_READ_TIMEOUT:
                 // The method was called in response to stream_set_timeout()
                 $this->readTimeout = $arg1 + ($arg2 / 1000000);
                 return true;
 
-            case STREAM_OPTION_WRITE_BUFFER:
+            case \STREAM_OPTION_WRITE_BUFFER:
                 // The method was called in response to stream_set_write_buffer()
-                if (0 === stream_set_write_buffer($this->fp, $arg2)) {
+                if (0 === stream_set_write_buffer($this->internalFP, $arg2)) {
                     return true;
                 }
                 return false;
 
-            case STREAM_OPTION_READ_BUFFER:
-                if (0 === stream_set_read_buffer($this->fp, $arg2)) {
+            case \STREAM_OPTION_READ_BUFFER:
+                if (0 === stream_set_read_buffer($this->internalFP, $arg2)) {
                     return true;
                 }
                 return false;
@@ -213,38 +243,47 @@ class Unblocker {
     }
 
     public function stream_stat(): array|false {
-        $this->suspend();
-        return fstat($this->fp);
+        MOEBIUS_DEBUG and self::debugLogFunc(__METHOD__);
+        return fstat($this->internalFP);
     }
 
     public function stream_tell(): int {
-        $this->suspend();
-        return ftell($this->fp);
+        MOEBIUS_DEBUG and self::debugLogFunc(__METHOD__);
+        return ftell($this->internalFP);
+    }
+
+    public function stream_cast(int $cast_as) {
+        MOEBIUS_DEBUG and self::debugLogFunc(__METHOD__);
+        return $this->internalFP;
     }
 
     public function stream_truncate(int $new_size): bool {
-        $this->suspend();
-        return ftruncate($this->fp, $new_size);
+        MOEBIUS_DEBUG and self::debugLogFunc(__METHOD__);
+        $this->writable();
+        return ftruncate($this->internalFP, $new_size);
     }
 
     public function stream_write(string $data): int {
+        MOEBIUS_DEBUG and self::debugLogFunc(__METHOD__);
+//echo strtr($data, [ "\n" => "\n >>> " ]);
         if ($this->pretendNonBlocking) {
-            if (!$this->writable($this->fp, 0)) {
+            if (!$this->writable($this->internalFP, 0)) {
                 return 0;
             }
-            return fwrite($this->fp, $count);
+            return fwrite($this->internalFP, $count);
         }
-        if (!$this->writable($this->fp, $this->readTimeout)) {
+        if (!$this->writable($this->internalFP, $this->readTimeout)) {
             // timed out
             return 0;
         }
-        return fwrite($this->fp, $data);
+        return fwrite($this->internalFP, $data);
     }
 
     protected function readable(mixed $stream, float $timeout=null): bool {
         if ($this->destroyed) {
             return false;
         }
+        MOEBIUS_DEBUG and self::debugLog("Await readable");
         return Co::readable($stream, $timeout);
     }
 
@@ -252,12 +291,40 @@ class Unblocker {
         if ($this->destroyed) {
             return false;
         }
+        MOEBIUS_DEBUG and self::debugLog("Await writable");
         return Co::writable($stream, $timeout);
     }
 
     protected function suspend(): void {
         if (!$this->destroyed) {
+            MOEBIUS_DEBUG and self::debugLog("Suspend");
             Co::suspend();
         }
+    }
+
+    private static function debugLogFunc(string $method, array $args=[]): void {
+        self::debugLog($method."(".implode(", ", $args).")");
+    }
+
+    private static function debugLog(string $message, array $context=[]): void {
+        if (!MOEBIUS_DEBUG) {
+            return;
+        }
+
+        $prefix = 'Unblocker: ';
+
+        self::getLogger()->debug($prefix.$message, $context);
+    }
+
+    protected static function getLogger(): LoggerInterface {
+        if (null === self::$logger) {
+            self::$logger = FallbackLogger::get();
+        }
+
+        return self::$logger;
+    }
+
+    public static function setLogger(LoggerInterface $logger) {
+        self::$logger = $logger;
     }
 }

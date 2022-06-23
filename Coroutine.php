@@ -64,7 +64,7 @@ class Coroutine extends ProtoPromise {
 
     private static ?LoggerInterface $logger = null;
 
-    public static function go(Closure $callback, mixed ...$args): PromiseInterface {
+    public static function go(Closure|callable $callback, mixed ...$args): PromiseInterface {
         return new self($callback, ...$args);
     }
 
@@ -98,7 +98,7 @@ class Coroutine extends ProtoPromise {
         }
     }
 
-    public static function run(Closure $callback, mixed ...$args): mixed {
+    public static function run(Closure|callable $callback, mixed ...$args): mixed {
         return self::await(self::go($callback, ...$args));
     }
 
@@ -249,7 +249,7 @@ class Coroutine extends ProtoPromise {
     private mixed $value;
     private int $id;
 
-    private function __construct(Closure $callback, mixed ...$args) {
+    private function __construct(Closure|callable $callback, mixed ...$args) {
         if (self::$fibers === null) {
             self::$fibers = new WeakMap();
         }
